@@ -137,29 +137,20 @@ void sendData(String s1, String s2, String s3, String s4)
   {
     bool leadingData = false;
     String outString = "{\"data\":[";
-    if(s1.length)
-    {
-      leadingData = true;
-      outString += s1;
-    }
-    if(s2.length)
-    {
-      if(leadingData) outString += ",";
-      leadingData =  true;
-      outString += s2;
-    }
-    if(s3.length)
-    {
-      if(leadingData) outString += ",";
-      leadingData =  true;
-      outString += s3;
-    }
-    if(s4.length)
-    {
-      if(leadingData) outString += ",";
-      leadingData =  true;
-      outString += s4;
-    }
+
+    auto outputString = [&](String s){
+      if(s.length)
+      {
+        if(leadingData) outString += ",";
+        leadingData =  true;
+        outString += s2;
+      }
+    };
+
+    outputString(s1);
+    outputString(s2);
+    outputString(s3);
+    outputString(s4);
     outString += "]}";
     Serial.print(outString);
     SerialUSB.println(outString);
