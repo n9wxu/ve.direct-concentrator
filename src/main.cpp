@@ -133,13 +133,13 @@ void setup()
 
 void sendData(String s1, String s2, String s3, String s4)
 {
-  if(s1.length || s2.length || s3.length || s4.length)
+  if(s1.length() || s2.length() || s3.length() || s4.length())
   {
     bool leadingData = false;
     String outString = "{\"data\":[";
 
     auto outputString = [&](String s){
-      if(s.length)
+      if(s.length())
       {
         if(leadingData) outString += ",";
         leadingData =  true;

@@ -12,5 +12,10 @@ ve_direct::~ve_direct()
 
 void ve_direct::update(String &outString)
 {
-
+    if(thisUart.available())
+    {
+        ve_frame.rxData(thisUart.read());
+    }
+    if(ve_frame.isDataReady())
+        outString = ve_frame.getString().c_str();
 }
