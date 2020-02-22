@@ -104,16 +104,22 @@ void pinFlipper(int p)
   }
 }
 
-ve_direct ve_direct1(ve1);
-ve_direct ve_direct2(ve2);
-ve_direct ve_direct3(ve3);
-ve_direct ve_direct4(ve4);
+ve_direct *ve_direct1;
+ve_direct *ve_direct2;
+ve_direct *ve_direct3;
+ve_direct *ve_direct4;
+
+const int drive1 = A1;
+const int drive2 = A2;
+const int driveI1 = A0;
+const int driveI2 = 13;
 
 void setup() 
 {
   SerialUSB.begin(115200);
   Serial.begin(115200);
 
+  SerialUSB.println("Hello_World");
   pinPeripheral(0,PIO_SERCOM);
   pinPeripheral(1,PIO_SERCOM);
 
@@ -129,6 +135,16 @@ void setup()
   pinPeripheral(6,PIO_SERCOM);
   pinPeripheral(7,PIO_SERCOM);
 
+  pinMode(drive1,OUTPUT);
+  pinMode(drive2,OUTPUT);
+  pinMode(driveI1,INPUT);
+  pinMode(driveI2,INPUT);
+
+  ve_direct1 = new ve_direct(ve1);
+  ve_direct2 = new ve_direct(ve2);
+  ve_direct3 = new ve_direct(ve3);
+  ve_direct4 = new ve_direct(ve4);
+  SerialUSB.println("Setup Complete");
 }
 
 void sendData(String s1, String s2, String s3, String s4)
@@ -136,7 +152,7 @@ void sendData(String s1, String s2, String s3, String s4)
   if(s1.length() || s2.length() || s3.length() || s4.length())
   {
     bool leadingData = false;
-    String outString = "{\"data\":[";
+    String outString = "{\"data\":{";
 
     auto outputString = [&](String s){
       if(s.length())
@@ -159,15 +175,37 @@ void sendData(String s1, String s2, String s3, String s4)
 
 void loop() {
 
+  while(SerialUSB.available())
+  {
+    char c = SerialUSB.read();
+    switch(c)
+    {
+      case 'A':
+        digitalWrite(drive1,HIGH);
+        break;
+      case 'a':
+        digitalWrite(drive1,LOW);
+        break;
+      case 'B':
+        digitalWrite(drive2,HIGH);
+        break;
+      case 'b':
+        digitalWrite(drive2,LOW);
+        break;
+      default:
+      break;
+    }
+  }
+
   String tx1_string = "";
   String tx2_string = "";
   String tx3_string = "";
   String tx4_string = "";
 
-  ve_direct1.update(tx1_string);
-  ve_direct2.update(tx2_string);
-  ve_direct3.update(tx3_string);
-  ve_direct4.update(tx4_string);
+  ve_direct1->update(tx1_string);
+  ve_direct2->update(tx2_string);
+  ve_direct3->update(tx3_string);
+  ve_direct4->update(tx4_string);
 
   sendData(tx1_string,tx2_string,tx3_string,tx4_string);
 }
