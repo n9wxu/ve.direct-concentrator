@@ -1,165 +1,128 @@
 #include <Arduino.h>
-#include "wiring_private.h"
-#include "ve_direct.hpp"
 
-#define LED 13
+#include "ve_direct.hpp"
+#include "wiring_private.h"
+
+const int sc1_tx = 10;
+const int sc1_rx = 12;
+const int sc2_tx = 2;
+const int sc2_rx = 5;
+const int sc3_tx = 20;
+const int sc3_rx = 21;
+const int sc4_tx = 15;
+const int sc4_rx = 16;
+
+const int drive1 = 8;
+const int drive2 = 9;
+const int driveI1 = 14;  // A0
+const int driveI2 = 17;  // A3
+
+const int LED_VE1 = 18;  // A4
+const int LED_VE2 = 11;
+const int LED_VE3 = 13;
+const int LED_VE4 = 6;
+const int LED_BUS = 7;
+
+const int DE = 3;
 
 /*
 Table from Datasheet page 21-23
   Arduino Pin - SAM Pin - SERCOM PAD - SERCOM ALT PAD
-  Crystal         PA0                       1-0
-  Crystal         PA1                       1-1
-  A1              PB8                       4-0
-  A2              PB9                       4-1
-  A3              PA4                       0-0
-  A4              PA5                       0-1
-  D8              PA6                       0-2
-  D9              PA7                       0-3
-  D4              PA8          0-0          2-0
-  D3              PA9          0-1          2-1
 * D1/TX0          PA10         0-2          2-2
 * D0/RX1          PA11         0-3          2-3
-  MOSI            PB10                      4-2
-  SCK             PB11                      4-3
-  --              PB12         4-0
-  --              PB13         4-1
-  --              PB14         4-2
-  --              PB15         4-3
-  --              PA12         2-0          4-0
-  --              PA13         2-1          4-1
-  D2              PA14         2-2          4-2
-  D5              PA15         2-3          4-3
-  D11/MOSI        PA16         1-0          3-0
-  D13/SCK         PA17         1-1          3-1
+
   D10/SS          PA18         1-2          3-2
   D12/MISO        PA19         1-3          3-3
-  --              PB16         5-0
-  --              PB17         5-1
-  D6              PA20         5-2          3-2
-  D7              PA21         5-3          3-3
-  SDA             PA22         3-0          5-0
-  SCL             PA23         3-1          5-1
-  USB D+          PA24         3-2          5-2
-  USB D-          PA25         3-3          5-3
-  --              PB22                      5-2
-  --              PB23                      5-3
-  SWCLK           PA30                      1-2
-  SWDIO           PA31                      2-3
-  --              PB30                      5-0
-  --              PB31                      5-1
-  --              PB0                       5-2
-  --              PB1                       5-3
-  A5              PB2                       5-0
-  RX_LED          PB3                       5-1
+
+  D2              PA14         2-2          4-2
+  D5              PA15         2-3          4-3
+
+  20 (SDA)        PA22         3-0          5-0
+  21 (SCL)        PA23         3-1          5-1
+
+  15 (A1)         PB8                       4-0
+  16 (A2)         PB9                       4-1
+
+SERCOM 0 = 485 bus
+SERCON 1-4 = VE.direct 1-4
 */
 
-/* PCB VE_Direct Allocation
-Channel : TX     : RX
-   0      D1 /2    D0 /3
-   1      D10/2    D12/3
-   2      D2 /2    D5 /3
-   3      SDA/0    SCL/1
-   4
-   5      D6 /2    D7 /3
- */
+Uart Serial(&sercom0, 0, 1, SERCOM_RX_PAD_3, UART_TX_PAD_2);
 
-Uart ve1(&sercom0,  0,  1,SERCOM_RX_PAD_3,UART_TX_PAD_2); // check
-Uart ve2(&sercom1, 12, 10,SERCOM_RX_PAD_3,UART_TX_PAD_2); // check
-Uart ve3(&sercom2, 5,   4,SERCOM_RX_PAD_3,UART_TX_PAD_2); 
-Uart ve4(&sercom3,SCL,SDA,SERCOM_RX_PAD_1,UART_TX_PAD_0); // check
+// messed up physical layout.  this reorganizses the pins
+Uart ve1(&sercom2, sc2_rx, sc2_tx, SERCOM_RX_PAD_3, UART_TX_PAD_2);
+Uart ve2(&sercom3, sc3_rx, sc3_tx, SERCOM_RX_PAD_1, UART_TX_PAD_0);
+Uart ve3(&sercom1, sc1_rx, sc1_tx, SERCOM_RX_PAD_3, UART_TX_PAD_2);
+Uart ve4(&sercom4, sc4_rx, sc4_tx, SERCOM_RX_PAD_1, UART_TX_PAD_0);
 
-Uart Serial(&sercom5,7,6,SERCOM_RX_PAD_3,UART_TX_PAD_2);
+void SERCOM1_Handler() { ve1.IrqHandler(); }
 
-void SERCOM0_Handler()
-{
-  ve1.IrqHandler();
-}
+void SERCOM2_Handler() { ve2.IrqHandler(); }
 
-void SERCOM1_Handler()
-{
-  ve2.IrqHandler();
-}
+void SERCOM3_Handler() { ve3.IrqHandler(); }
 
-void SERCOM2_Handler()
-{
-  ve3.IrqHandler();
-}
+void SERCOM4_Handler() { ve4.IrqHandler(); }
 
-void SERCOM3_Handler()
-{
-  ve4.IrqHandler();
-}
+void SERCOM0_Handler() { Serial.IrqHandler(); }
 
-void SERCOM5_Handler()
-{
-  Serial.IrqHandler();
-}
-
-void pinFlipper(int p)
-{
-  for(int x = 0; x < p; x ++)
-  {
-    digitalWrite(p,HIGH);
-    digitalWrite(p,LOW);
+void pinFlipper(int p) {
+  pinMode(p, OUTPUT);
+  for (int x = 0; x < 50; x++) {
+    digitalWrite(p, HIGH);
+    delay(1);
+    digitalWrite(p, LOW);
+    delay(1);
   }
 }
 
-ve_direct *ve_direct1;
-ve_direct *ve_direct2;
-ve_direct *ve_direct3;
-ve_direct *ve_direct4;
+ve_direct ve_direct1(ve1, LED_VE1);
+ve_direct ve_direct2(ve2, LED_VE2);
+ve_direct ve_direct3(ve3, LED_VE3);
+ve_direct ve_direct4(ve4, LED_VE4);
 
-const int drive1 = A1;
-const int drive2 = A2;
-const int driveI1 = A0;
-const int driveI2 = 13;
-
-void setup() 
-{
+void setup() {
   SerialUSB.begin(115200);
   Serial.begin(115200);
 
   SerialUSB.println("Hello_World");
-  pinPeripheral(0,PIO_SERCOM);
-  pinPeripheral(1,PIO_SERCOM);
 
-  pinPeripheral(12,PIO_SERCOM);
-  pinPeripheral(10,PIO_SERCOM);
+  ve1.begin(19200);
+  ve2.begin(19200);
+  ve3.begin(19200);
+  ve4.begin(19200);
 
-  pinPeripheral(4,PIO_SERCOM);
-  pinPeripheral(5,PIO_SERCOM);
+  pinPeripheral(sc1_tx, PIO_SERCOM);
+  pinPeripheral(sc1_rx, PIO_SERCOM);
+  pinPeripheral(sc2_tx, PIO_SERCOM);
+  pinPeripheral(sc2_rx, PIO_SERCOM);
+  pinPeripheral(sc3_tx, PIO_SERCOM);
+  pinPeripheral(sc3_rx, PIO_SERCOM);
+  pinPeripheral(sc4_tx, PIO_SERCOM_ALT);
+  pinPeripheral(sc4_rx, PIO_SERCOM_ALT);
 
-  pinPeripheral(SCL,PIO_SERCOM);
-  pinPeripheral(SDA,PIO_SERCOM);
-
-  pinPeripheral(6,PIO_SERCOM);
-  pinPeripheral(7,PIO_SERCOM);
-
-  pinMode(drive1,OUTPUT);
-  pinMode(drive2,OUTPUT);
-  pinMode(driveI1,INPUT);
-  pinMode(driveI2,INPUT);
-
-  ve_direct1 = new ve_direct(ve1);
-  ve_direct2 = new ve_direct(ve2);
-  ve_direct3 = new ve_direct(ve3);
-  ve_direct4 = new ve_direct(ve4);
+  pinMode(drive1, OUTPUT);
+  pinMode(drive2, OUTPUT);
+  pinMode(driveI1, INPUT);
+  pinMode(driveI2, INPUT);
+  pinMode(LED_BUS, OUTPUT);
+  pinMode(LED_VE1, OUTPUT);
+  pinMode(LED_VE2, OUTPUT);
+  pinMode(LED_VE3, OUTPUT);
+  pinMode(LED_VE4, OUTPUT);
+  pinMode(DE, OUTPUT);
   SerialUSB.println("Setup Complete");
 }
 
-void sendData(String s1, String s2, String s3, String s4)
-{
-  if(s1.length() || s2.length() || s3.length() || s4.length())
-  {
+void sendData(String s1, String s2, String s3, String s4) {
+  if (s1.length() || s2.length() || s3.length() || s4.length()) {
     bool leadingData = false;
-    String outString = "{\"data\":{";
+    String outString = "{\"data\":{[";
 
-    auto outputString = [&](String s){
-      if(s.length())
-      {
-        if(leadingData) outString += ",";
-        leadingData =  true;
-        outString += s2;
+    auto outputString = [&](String s) {
+      if (s.length()) {
+        if (leadingData) outString += ",";
+        leadingData = true;
+        outString += s;
       }
     };
 
@@ -174,26 +137,33 @@ void sendData(String s1, String s2, String s3, String s4)
 }
 
 void loop() {
-
-  while(SerialUSB.available())
-  {
+  if (SerialUSB.available()) {
     char c = SerialUSB.read();
-    switch(c)
-    {
-      case 'A':
-        digitalWrite(drive1,HIGH);
-        break;
+
+    switch (c) {
       case 'a':
-        digitalWrite(drive1,LOW);
-        break;
-      case 'B':
-        digitalWrite(drive2,HIGH);
+        digitalWrite(drive1, !digitalRead(drive1));
         break;
       case 'b':
-        digitalWrite(drive2,LOW);
+        digitalWrite(drive2, !digitalRead(drive2));
+        break;
+      case '1':
+        digitalWrite(LED_VE1, !digitalRead(LED_VE1));
+        break;
+      case '2':
+        digitalWrite(LED_VE2, !digitalRead(LED_VE2));
+        break;
+      case '3':
+        digitalWrite(LED_VE3, !digitalRead(LED_VE3));
+        break;
+      case '4':
+        digitalWrite(LED_VE4, !digitalRead(LED_VE4));
+        break;
+      case '5':
+        digitalWrite(LED_BUS, !digitalRead(LED_BUS));
         break;
       default:
-      break;
+        break;
     }
   }
 
@@ -202,10 +172,10 @@ void loop() {
   String tx3_string = "";
   String tx4_string = "";
 
-  ve_direct1->update(tx1_string);
-  ve_direct2->update(tx2_string);
-  ve_direct3->update(tx3_string);
-  ve_direct4->update(tx4_string);
+  ve_direct1.update(tx1_string);
+  ve_direct2.update(tx2_string);
+  ve_direct3.update(tx3_string);
+  ve_direct4.update(tx4_string);
 
-  sendData(tx1_string,tx2_string,tx3_string,tx4_string);
+  sendData(tx1_string, tx2_string, tx3_string, tx4_string);
 }

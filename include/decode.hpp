@@ -12,23 +12,30 @@
 #include <map>
 #include <string>
 
-class VeDirectFrameHandler
-{
-private:
-    std::map<std::string,std::string> keyMap;
-    bool dataReady;
-    std::string outputString;
-public:
-    VeDirectFrameHandler();
-    void rxData(uint8_t);
-    
-    bool hexRxEvent(uint8_t);
-    void frameEndEvent(bool);
+class VeDirectFrameHandler {
+ private:
+  bool dataReady;
+  std::string outputString;
+  std::map<std::string, std::string> dataMap;
+  enum class states { IDLE, RECORD_BEGIN, RECORD_HEX, RECORD_NAME, RECORD_VALUE, CHECKSUM };
+  const char *stateStrings[6] = {"IDLE", "R BEGIN", "R HEX", "R NAME", "R VALUE", "R CHECKSUM"};
+  states mState = states::IDLE;
+  int8_t mChecksum = 0;
+  std::string key = "";
+  std::string value = "";
 
-    bool isDataReady(void) { return dataReady; };
-    std::string &getString(void) { dataReady = false; return outputString;};
-    
-    void logE(const char *, const char *);
+ public:
+  VeDirectFrameHandler();
+  void rxData(uint8_t);
+
+  bool hexRxEvent(uint8_t);
+  void frameEndEvent(bool);
+
+  bool isDataReady(void) { return dataReady; };
+  std::string &getString(void) {
+    dataReady = false;
+    return outputString;
+  };
 };
 
 #endif /* decode_hpp */

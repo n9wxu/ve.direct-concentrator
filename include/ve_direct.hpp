@@ -3,19 +3,20 @@
 #undef max
 #undef min
 
-#include "wiring_private.h"
-
 #include "decode.hpp"
+#include "wiring_private.h"
 
 #pragma once
 
-class ve_direct
-{
-    private:
-    Uart thisUart;
-    VeDirectFrameHandler ve_frame;
-    public:
-    ve_direct(Uart &u);
-    ~ve_direct();
-    void update(String &outString);
+class ve_direct {
+ private:
+  Uart &thisUart;
+  VeDirectFrameHandler ve_frame;
+  int _led;
+  int ledTimer;
+
+ public:
+  ve_direct(Uart &u, int l);
+  ~ve_direct();
+  void update(String &outString);
 };
