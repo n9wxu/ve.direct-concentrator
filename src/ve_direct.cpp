@@ -6,7 +6,7 @@ ve_direct::~ve_direct() { thisUart.end(); }
 
 const int LED_TIME = 100;
 
-void ve_direct::update(String &outString) {
+void ve_direct::update() {
   int now = millis();
   if (now - ledTimer < LED_TIME) {
     digitalWrite(_led, HIGH);
@@ -20,5 +20,10 @@ void ve_direct::update(String &outString) {
     ve_frame.rxData(c);
     digitalWrite(_led, LOW);
   }
-  if (ve_frame.isDataReady()) outString = ve_frame.getString();
+}
+void ve_direct::getData(String &outString) {
+  if (ve_frame.isDataReady())
+    outString += ve_frame.getString();
+  else
+    outString += "{}";
 }

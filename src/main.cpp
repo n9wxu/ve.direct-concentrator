@@ -82,7 +82,7 @@ ve_direct ve_direct4(ve4, LED_VE4);
 
 void setup() {
   SerialUSB.begin(921600);
-  Serial.begin(230400);
+  Serial.begin(460800);
 
   SerialUSB.println("Hello_World\n\n\n\n\n");
 
@@ -121,58 +121,46 @@ void rs485_print(String s) {
 }
 
 void loop() {
-  digitalWrite(DE, LOW);
+  ve_direct1.update();
+  ve_direct2.update();
+  ve_direct3.update();
+  ve_direct4.update();
 
   if (Serial.available()) {
     char c = Serial.read();
 
     switch (c) {
       case 'a':
-        digitalWrite(drive1, !digitalRead(drive1));
+        digitalWrite(drive1, LOW);
+        SerialUSB.println("Drive A OFF");
+        break;
+      case 'A':
+        digitalWrite(drive1, HIGH);
+        SerialUSB.println("Drive A ON");
         break;
       case 'b':
-        digitalWrite(drive2, !digitalRead(drive2));
+        digitalWrite(drive2, LOW);
+        SerialUSB.println("Drive B OFF");
         break;
-      case '1':
-        digitalWrite(LED_VE1, !digitalRead(LED_VE1));
+      case 'B':
+        digitalWrite(drive2, HIGH);
+        SerialUSB.println("Drive B ON");
         break;
-      case '2':
-        digitalWrite(LED_VE2, !digitalRead(LED_VE2));
-        break;
-      case '3':
-        digitalWrite(LED_VE3, !digitalRead(LED_VE3));
-        break;
-      case '4':
-        digitalWrite(LED_VE4, !digitalRead(LED_VE4));
-        break;
-      case '5':
-        digitalWrite(LED_BUS, !digitalRead(LED_BUS));
-        break;
+      case 'v': {
+        SerialUSB.println("Data Update");
+        String data_string = "{\"P1\":";
+        ve_direct1.getData(data_string);
+        data_string += ",\"P2\":";
+        ve_direct2.getData(data_string);
+        data_string += ",\"P3\":";
+        ve_direct3.getData(data_string);
+        data_string += ",\"P4\":";
+        ve_direct4.getData(data_string);
+        data_string += "}";
+        rs485_print(data_string);
+      } break;
       default:
         break;
     }
-  }
-
-  String data_string = "";
-
-  ve_direct1.update(data_string);
-  if (data_string.length()) {
-    rs485_print(data_string);
-    data_string = "";
-  }
-  ve_direct2.update(data_string);
-  if (data_string.length()) {
-    rs485_print(data_string);
-    data_string = "";
-  }
-  ve_direct3.update(data_string);
-  if (data_string.length()) {
-    rs485_print(data_string);
-    data_string = "";
-  }
-  ve_direct4.update(data_string);
-  if (data_string.length()) {
-    rs485_print(data_string);
-    data_string = "";
   }
 }

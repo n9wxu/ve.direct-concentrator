@@ -18,5 +18,6 @@ class ve_direct {
  public:
   ve_direct(Uart &u, int l);
   ~ve_direct();
-  void update(String &outString);
+  void update();
+  void getData(String &outString);
 };
