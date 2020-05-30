@@ -9,30 +9,69 @@
 #ifndef decode_hpp
 #define decode_hpp
 
-#include <map>
-#include <string>
+#include <Arduino.h>
+
+class record {
+ private:
+  char key[32];
+  char value[32];
+  int keyIdx;
+  int valueIdx;
+  bool keyMode;
+  char outBuffer[80];
+
+ public:
+  record() : keyIdx(0), valueIdx(0), keyMode(true){};
+  void clear() {
+    keyIdx = 0;
+    valueIdx = 0;
+  };
+  void addByte(char b) {
+    if (keyMode) {
+      if (b == 0x09)
+        keyMode = false;
+      else {
+        key[keyIdx++] = b;
+        key[keyIdx] = 0;
+      }
+    } else {
+      value[valueIdx++] = b;
+      value[valueIdx] = 0;
+    }
+  }
+
+  bool isChecksum() { return strcmp(key, "Checksum") == 0; };
+
+  char *getOutput() {
+    sprintf(outBuffer, "{\"%s\":\"%s\"", key, value);
+    return outBuffer;
+  }
+};
 
 class VeDirectFrameHandler {
  private:
   bool dataReady;
-  std::string outputString;
-  std::map<std::string, std::string> dataMap;
-  enum class states { IDLE, RECORD_BEGIN, RECORD_HEX, RECORD_NAME, RECORD_VALUE, CHECKSUM };
-  const char *stateStrings[6] = {"IDLE", "R BEGIN", "R HEX", "R NAME", "R VALUE", "R CHECKSUM"};
-  states mState = states::IDLE;
-  int8_t mChecksum = 0;
-  std::string key = "";
-  std::string value = "";
+  String outputString;
+
+  enum class states { IN_HEX, WAIT_HEADER, IN_DATA, IN_CHECKSUM };
+  states mState;
+  int8_t mChecksum;
+
+  record data;
+
+  const char header1 = 13;
+  const char header2 = 10;
+  const char hexmarker = ':';
+  const char delimiter = 9;
 
  public:
   VeDirectFrameHandler();
   void rxData(uint8_t);
 
   bool hexRxEvent(uint8_t);
-  void frameEndEvent(bool);
 
   bool isDataReady(void) { return dataReady; };
-  std::string &getString(void) {
+  String &getString(void) {
     dataReady = false;
     return outputString;
   };

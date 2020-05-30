@@ -12,82 +12,74 @@
 
 #define MODULE "VE.Frame"
 
-VeDirectFrameHandler::VeDirectFrameHandler() {
-  key.reserve(32);
-  value.reserve(32);
-}
+VeDirectFrameHandler::VeDirectFrameHandler() : mState(states::WAIT_HEADER), mChecksum(0) { data.clear(); }
 
 void VeDirectFrameHandler::rxData(const uint8_t inbyte) {
-  const std::string checksumTagName("CHECKSUM");
-  states nextState = mState;
+  states nextState;
+
+  if (inbyte == hexmarker && mState != states::IN_CHECKSUM) {
+    mState = states::IN_HEX;
+  }
+
+  mChecksum += inbyte;
+  nextState = mState;
 
   switch (mState) {
-    case states::IDLE:
-      /* wait for 10 of the start of an record */
-      if (inbyte == 13) {
-        nextState = states::RECORD_BEGIN;
-        mChecksum = 0;
-      } else if (inbyte == ':') {
-        nextState = states::RECORD_HEX;
+    case states::WAIT_HEADER:
+      if (inbyte == header2) {
+        nextState = states::IN_DATA;
+        SerialUSB.println("ID");
       }
-
       break;
-    case states::RECORD_BEGIN:
-      key.clear();
-      value.clear();
-      key += toupper(inbyte);
-      nextState = states::RECORD_NAME;
-      break;
-    case states::RECORD_NAME:
-      // The record name is being received, terminated by a \t
-      if (inbyte == 9 || inbyte == 32) {
-        // the Checksum record indicates a EOR
-        if (key.compare(checksumTagName) == 0) {
-          nextState = states::CHECKSUM;
+    case states::IN_DATA:
+      if (inbyte == header1) {
+        SerialUSB.println("WH");
+        nextState = states::WAIT_HEADER;
+        if (outputString.length() == 0) {
+          outputString = "{";
         } else {
-          nextState = states::RECORD_VALUE;
+          outputString += ",";
         }
+        outputString += data.getOutput();
+        data.clear();
+      } else if (data.isChecksum()) {
+        nextState = states::IN_CHECKSUM;
+        SerialUSB.println("IC");
       } else {
-        key += toupper(inbyte);
+        data.addByte(inbyte);
       }
       break;
-    case states::RECORD_VALUE:
-      // The record value is being received.  The \r indicates a new record.
-      if (inbyte == 13) {
-        dataMap.emplace(key, value);
-        nextState = states::RECORD_BEGIN;
-      } else if (inbyte == 32) {
+    case states::IN_CHECKSUM: {
+      data.clear();
+      nextState = states::WAIT_HEADER;
+      if (mChecksum % 256 == 0) {
+        outputString += "}";
+        dataReady = true;
       } else {
-        value += toupper(inbyte);
-        break;
+        SerialUSB.println(" CKSM Fail");
+        outputString = "";
       }
-      break;
-    case states::CHECKSUM: {
-      frameEndEvent(mChecksum == 0);
-      nextState = states::IDLE;
+      mChecksum = 0;
       break;
     }
-    case states::RECORD_HEX:
-      if (hexRxEvent(inbyte)) {
-        mChecksum = 0;
-        nextState = states::IDLE;
+    case states::IN_HEX:
+      SerialUSB.println("IH");
+      mChecksum = 0;
+      if (inbyte == header2) {
+        outputString = "";
+        data.clear();
+        nextState = states::WAIT_HEADER;
+        SerialUSB.println("WH");
       }
+      break;
+    default:
+      nextState = states::WAIT_HEADER;
+      SerialUSB.println("Decode Default");
+      data.clear();
+      outputString = "";
       break;
   }
   mState = nextState;
-}
-
-void VeDirectFrameHandler::frameEndEvent(bool v) {
-  if (v) {
-    outputString = "";
-    bool first = false;
-    for (auto d : dataMap) {
-      if (first) outputString += ",";
-      outputString += "\"" + d.first + "\":\"" + d.second + "\"";
-      first = true;
-    }
-    dataReady = true;
-  }
 }
 
 bool VeDirectFrameHandler::hexRxEvent(uint8_t b) { return false; }

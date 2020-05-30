@@ -20,5 +20,5 @@ void ve_direct::update(String &outString) {
     ve_frame.rxData(c);
     digitalWrite(_led, LOW);
   }
-  if (ve_frame.isDataReady()) outString = ve_frame.getString().c_str();
+  if (ve_frame.isDataReady()) outString = ve_frame.getString();
 }
