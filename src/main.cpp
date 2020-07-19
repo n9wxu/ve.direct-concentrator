@@ -53,13 +53,13 @@ Uart Serial(&sercom0, 0, 1, SERCOM_RX_PAD_3, UART_TX_PAD_2);
 Uart ve1(&sercom2, sc2_rx, sc2_tx, SERCOM_RX_PAD_3, UART_TX_PAD_2);
 Uart ve2(&sercom3, sc3_rx, sc3_tx, SERCOM_RX_PAD_1, UART_TX_PAD_0);
 Uart ve3(&sercom1, sc1_rx, sc1_tx, SERCOM_RX_PAD_3, UART_TX_PAD_2);
-Uart ve4(&sercom4, sc4_rx, sc4_tx, SERCOM_RX_PAD_1, UART_TX_PAD_0);
+Uart ve4(&sercom4, sc4_rx, sc4_tx, SERCOM_RX_PAD_1, UART_TX_PAD_0);  // works
 
-void SERCOM1_Handler() { ve1.IrqHandler(); }
+void SERCOM1_Handler() { ve3.IrqHandler(); }
 
-void SERCOM2_Handler() { ve2.IrqHandler(); }
+void SERCOM2_Handler() { ve1.IrqHandler(); }
 
-void SERCOM3_Handler() { ve3.IrqHandler(); }
+void SERCOM3_Handler() { ve2.IrqHandler(); }
 
 void SERCOM4_Handler() { ve4.IrqHandler(); }
 
@@ -82,8 +82,7 @@ ve_direct ve_direct4(ve4, LED_VE4);
 
 void setup() {
   SerialUSB.begin(921600);
-  Serial.begin(460800);
-
+  Serial.begin(38400);
   SerialUSB.println("Hello_World\n\n\n\n\n");
 
   ve1.begin(19200);
@@ -116,7 +115,7 @@ void setup() {
 void rs485_print(String s) {
   digitalWrite(DE, HIGH);
   Serial.println(s);
-  delayMicroseconds(100 * s.length());
+  Serial.flush();
   digitalWrite(DE, LOW);
 }
 
