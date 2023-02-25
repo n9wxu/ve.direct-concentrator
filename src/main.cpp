@@ -126,6 +126,7 @@ void loop() {
   ve_direct4.update();
 
   if (Serial.available()) {
+    digitalWrite(LED_BUS, HIGH);
     char c = Serial.read();
 
     switch (c) {
@@ -161,5 +162,6 @@ void loop() {
       default:
         break;
     }
+    digitalWrite(LED_BUS, LOW);
   }
 }
