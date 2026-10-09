@@ -233,3 +233,24 @@ Still to change on recon:
 - Whatever read the Duo2 through the tunnel at 10.55.0.2 no longer has a path:
   this unit replaces the RP2040 on the bus (`collector/link_health.py` on the
   Duo2 pings recon across it).
+
+### Link diagnostics
+
+Three tools look at the link from recon, past what `ping` can show (tmptun
+drops a bad reply silently, so a lost one only shows as a ~100 ms spike):
+
+| Tool | What it answers |
+|---|---|
+| `tools/vecapture.py` | Is each device streaming, and intact? Captures every port's TCP stream, checks each VE.Direct block's checksum and decodes the latest values. Runs alongside tmptun; a port with a client already gets refused. |
+| `tools/bustest.py` | Is the wire good, and which way does it fail? Plays the master in tmptun's place (`--manage-tmptun` stops and restarts it) and counts each poll as answered, CRC-failed, partial or silent: silent polls are the unit not hearing recon, CRC failures the reverse. Also listens to the idle line, and reads the UART's framing and overrun counters. |
+| `tools/tmptun-debug.c` | What does the link do under tmptun's own timing? tmptun with every timeout logged, and a gap (`min_gap_us`) to hold polls that follow a frame. Build on recon beside `common/tmp_v2.h`. |
+
+```sh
+sudo tools/bustest.py --manage-tmptun        # ~25 s without the tunnel
+tools/vecapture.py --seconds 30
+```
+
+A unit that is silent to every poll while the idle line stays quiet is not
+hearing recon: power, then A/B polarity (swapped at the unit on 2026-10-08).
+Measured then, at 500 kbaud: about 51 Mbit toward the unit and 22 Mbit back
+without a CRC failure; the rare loss left was recon's UART overrunning (`oe`).
