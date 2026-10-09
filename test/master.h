@@ -39,6 +39,16 @@ extern struct tmp_frame answer;
 extern bool             answered;
 void exchange_raw(const uint8_t *bytes, size_t length);
 void poll(uint8_t address, const uint8_t *frame, size_t length);
+/* A poll with a given SEQ and FLAGS (poll() counts SEQ up and sends none). */
+void poll_as(uint8_t address, uint8_t poll_sequence, uint8_t flags, const uint8_t *frame,
+             size_t length);
+
+/* A master with acknowledged delivery (TMP_FLAG_ARQ), as recon's tmptun runs
+ * it: the SEQ of its frame and the SEQ it expects next from the unit. `lost`
+ * pretends the reply arrived corrupted: the master takes nothing from it, so
+ * it acknowledges nothing. arq_new: the reply carried a frame the master took. */
+extern bool arq_down_bit, arq_up_expected, arq_new;
+void arq_poll(const uint8_t *frame, size_t length, bool lost);
 
 /* Frame builders; each returns the header length. */
 uint16_t checksum(const uint8_t *data, size_t length, uint32_t sum);

@@ -7,7 +7,7 @@ project(vedirect_concentrator C)
 #   cmake -B build-host && cmake --build build-host && ctest --test-dir build-host
 
 # Reported by "status" and stored in each image. Bump for every release.
-set(VEDC_VERSION 6 CACHE STRING "Version number stored in the images")
+set(VEDC_VERSION 8 CACHE STRING "Version number stored in the images")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)

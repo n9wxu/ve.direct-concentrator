@@ -85,12 +85,39 @@ void exchange_raw(const uint8_t *bytes, size_t length)
     }
 }
 
-void poll(uint8_t address, const uint8_t *frame, size_t length)
+void poll_as(uint8_t address, uint8_t poll_sequence, uint8_t flags, const uint8_t *frame,
+             size_t length)
 {
     static uint8_t wire[TMP_FRAME_MAX];
-    const size_t wire_length = tmp_frame_build(wire, TMP_POLL, address, ++sequence,
-                                               tmp_flags(false, 0u), frame, length);
+    sequence = poll_sequence;
+    const size_t wire_length = tmp_frame_build(wire, TMP_POLL, address, poll_sequence, flags,
+                                               frame, length);
     exchange_raw(wire, wire_length);
+}
+
+void poll(uint8_t address, const uint8_t *frame, size_t length)
+{
+    poll_as(address, (uint8_t)(sequence + 1u), tmp_flags(false, 0u), frame, length);
+}
+
+bool arq_down_bit, arq_up_expected, arq_new;
+
+void arq_poll(const uint8_t *frame, size_t length, bool lost)
+{
+    const uint8_t flags = TMP_FLAG_ARQ | (arq_down_bit ? TMP_FLAG_SEQ : 0u)
+                        | (arq_up_expected ? TMP_FLAG_ACK : 0u);
+    poll_as(TMP_ADDR_COLLECTOR, (uint8_t)(sequence + 1u), flags, frame, length);
+    arq_new = false;
+    if (lost || !answered) {
+        return;
+    }
+    if (length != 0u && ((answer.flags & TMP_FLAG_ACK) != 0u) != arq_down_bit) {
+        arq_down_bit = !arq_down_bit;
+    }
+    if (answer.length != 0u && ((answer.flags & TMP_FLAG_SEQ) != 0u) == arq_up_expected) {
+        arq_up_expected = !arq_up_expected;
+        arq_new = true;
+    }
 }
 
 /* ── Frame builders ─────────────────────────────────────────────────── */

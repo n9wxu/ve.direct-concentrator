@@ -8,8 +8,15 @@
 
 /* The RS-485 side: a TMP-v2 slave that the master polls. Each POLL may carry
  * one Ethernet frame for us; each reply carries one of ours, or none. This is
- * the stack's MAC driver. Best-effort: a frame that cannot be queued is
- * dropped and TCP or the application retries. */
+ * the stack's MAC driver.
+ *
+ * A master that sets TMP_FLAG_ARQ acknowledges every frame: our frame stays at
+ * the head of the queue, and goes again with each reply, until a poll's ACK
+ * moves past it; a frame of the master's whose SEQ we have already taken is
+ * acknowledged again but not taken twice. No timer: the next poll is the
+ * clock. Without ARQ a frame leaves the queue once sent (best effort). A
+ * frame the queue has no room for is dropped, and TCP or the application
+ * retries. */
 
 extern const net_mac_t link485_mac;
 
@@ -33,5 +40,10 @@ uint32_t link485_poll_age_ms(void);
 /* Ethernet frames carried either way since reset, for the bus LED. Empty
  * polls and replies do not count: the master polls without pause. */
 uint32_t link485_frames(void);
+
+/* Our frames sent again because a poll did not acknowledge them, and frames
+ * of the master's received twice (our acknowledgement was lost), since reset. */
+uint32_t link485_resends(void);
+uint32_t link485_duplicates(void);
 
 #endif
