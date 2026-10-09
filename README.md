@@ -223,9 +223,10 @@ must change rate together.
 Updates need the TFTP service on recon (`trailer-monitor/ops/README.md`:
 `dnsmasq-base` and `vedc-tftp.service`) and `tools/vedc.py`. Before the unit
 goes on the bus, put the images it runs in `/srv/vedc`, so a fetch always
-finds a known-good pair. Release 5 changed only the VE port mapping, which the
-bootloader does not use, so the unit runs the v5 application with the v4
-bootloader.
+finds a known-good pair. The unit runs the v6 application with the v4
+bootloader: release 5 changed the VE port mapping, which the bootloader does
+not use, and release 6 the 485 echo flush, which in the bootloader only slows
+a fetch now and then.
 
 Still to change on recon:
 

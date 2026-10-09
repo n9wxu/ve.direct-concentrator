@@ -220,9 +220,10 @@ void rs485_send(const uint8_t *data, size_t length)
     while (!(usart->INTFLAG.reg & SERCOM_USART_INTFLAG_TXC)) {
     }
     delay_us(20);                       /* hold the final stop bit */
-    pin_write(PIN_485_DE, false);
-    delay_us(60);
     /* If the transceiver's receiver stays enabled we heard ourselves; the bus
-     * was ours throughout, so everything captured is echo. */
+     * is still ours, so everything captured is echo. Drop it before letting
+     * go: the master may poll again as soon as our last stop bit ends, and a
+     * flush after release would eat that poll's sync bytes. */
     uart_rx_flush(UART_485);
+    pin_write(PIN_485_DE, false);
 }
