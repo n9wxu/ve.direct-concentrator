@@ -24,35 +24,6 @@ static uint8_t          to_client_bytes[512], from_client_bytes[128];
 
 static int tap_received, tap_transmitted;
 
-/* An ICMP echo request to the unit carrying `tag` (4 bytes); returns its length. */
-static size_t ping_frame(uint8_t *frame, const char *tag)
-{
-    const size_t length = ipv4(frame, 1u, 8u + 4u);
-    memset(frame + length, 0, 8);
-    frame[length] = 8u;
-    memcpy(frame + length + 8, tag, 4);
-    put16(frame + length + 2, checksum(frame + length, 12u, 0u));
-    return length + 12u;
-}
-
-static bool is_echo_reply(const struct tmp_frame *frame, const char *tag)
-{
-    return frame->length >= 46u && frame->payload[23] == 1u && frame->payload[34] == 0u
-        && memcmp(frame->payload + 42, tag, 4) == 0;
-}
-
-/* New echo replies carrying `tag` in the answers to the next `polls` empty
- * ARQ polls. */
-static int echo_replies(const char *tag, int polls)
-{
-    int count = 0;
-    for (int index = 0; index < polls; index++) {
-        arq_poll(NULL, 0u, false);
-        count += answered && arq_new && is_echo_reply(&answer, tag);
-    }
-    return count;
-}
-
 static void tap(bool transmitted, const uint8_t *data, size_t length)
 {
     (void)data;
@@ -130,44 +101,6 @@ int main(void)
     CHECK(answered && answer.length >= 46u);
     CHECK(answer.payload[23] == 1u && answer.payload[34] == 0u);        /* ICMP echo reply */
     CHECK(memcmp(answer.payload + 42, "ping", 4) == 0);
-
-    /* Acknowledged delivery (ARQ). A frame of ours recon did not get intact is
-     * not acknowledged by its next poll, and goes again in the reply to that
-     * poll; once acknowledged, never again. */
-    {
-        arq_poll(frame, ping_frame(frame, "lost"), false);   /* the ping goes down */
-        CHECK(answered && (answer.flags & TMP_FLAG_ARQ) != 0u && answer.length == 0u);
-        arq_poll(NULL, 0u, true);                            /* its reply is corrupted */
-        CHECK(answered && is_echo_reply(&answer, "lost"));
-        const uint32_t resent = link485_resends();
-        arq_poll(NULL, 0u, false);                           /* no ACK: the same again */
-        CHECK(answered && arq_new && is_echo_reply(&answer, "lost"));
-        CHECK(link485_resends() == resent + 1u);
-        CHECK(echo_replies("lost", 4) == 0);
-    }
-    /* A frame of recon's whose acknowledgement was lost comes again with the
-     * same SEQ: acknowledged again, but the stack takes it once, so one echo
-     * request gets one echo reply. */
-    {
-        const size_t ping_length = ping_frame(frame, "once");
-        const uint32_t duplicates = link485_duplicates();
-        arq_poll(frame, ping_length, true);      /* taken; the reply with our ACK is lost */
-        arq_poll(frame, ping_length, true);      /* sent again: a duplicate */
-        arq_poll(frame, ping_length, false);     /* and again, acknowledged this time */
-        CHECK(link485_duplicates() == duplicates + 2u);
-        int echoes = answered && arq_new && is_echo_reply(&answer, "once");
-        echoes += echo_replies("once", 6);
-        CHECK(echoes == 1);
-    }
-    /* Without ARQ (the bootloader, an older tmptun) a frame leaves the
-     * queue once sent, as before. */
-    {
-        poll(TMP_ADDR_COLLECTOR, frame, ping_frame(frame, "best"));
-        poll(TMP_ADDR_COLLECTOR, NULL, 0u);
-        CHECK(answered && is_echo_reply(&answer, "best") && (answer.flags & TMP_FLAG_ARQ) == 0u);
-        poll(TMP_ADDR_COLLECTOR, NULL, 0u);
-        CHECK(answered && answer.length == 0u);
-    }
 
     /* UDP to the control port (an echo here). */
     length = ipv4(frame, 17u, 8u + 6u);

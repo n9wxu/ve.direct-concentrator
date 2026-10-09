@@ -12,9 +12,6 @@ Each poll is classified by what came back, which splits errors by direction:
   silent   nothing at all                     the unit did not take the poll:
                                               recon -> unit error, or no unit
 
-Its polls do not set ARQ (acknowledged delivery), so the slave answers best
-effort and every error shows here instead of being repaired by the next poll.
-
 Phases, in this order, each reported on its own:
 
   --listen S   listen to the idle line for S seconds without polling

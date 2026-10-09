@@ -102,25 +102,6 @@ recon's RSM485PHT needed about 80 µs with the RP2040; an FT232R USB-485
 adapter with automatic direction control needs 150–300 µs. One image serves
 both, so what goes to recon can be tested on the bench first.
 
-### Acknowledged delivery
-
-recon's polls are the clock, and every frame is acknowledged (the link's
-ARQ, from [halfduplex-tcpip](https://github.com/n9wxu/halfduplex-tcpip)).
-Each poll acknowledges the unit's last frame and carries recon's next; each
-reply does the same the other way. A frame that did not arrive intact is not
-acknowledged, so it goes again with the next poll, a few milliseconds later;
-a frame repeated by recon is acknowledged again but not taken twice. A
-damaged frame (recon's UART overrunning, a burst of noise) therefore costs
-one exchange, not a TCP retransmission timeout: smallest_tcp waits 1 s and
-doubles that for the rest of the connection, which used to cost VE.Direct
-data once its 512-byte buffers filled.
-
-`status` counts both directions: `resent` (the unit's frames sent again
-because a poll did not acknowledge them) and `dup` (recon's frames received
-twice because the acknowledgement was lost). A poll without ARQ (an older
-tmptun) gets best effort, as before; so does the bootloader, whose link code
-predates ARQ.
-
 ## Building
 
 Needs `arm-none-eabi-gcc`, CMake and Python 3. Dependencies (smallest_tcp,
@@ -234,22 +215,18 @@ wire format, identical to `trailer-monitor/protocol/tmp_v2.h`.
 
 ## recon
 
-recon's master is `master/linux/tmptun.c` from
-[halfduplex-tcpip](https://github.com/n9wxu/halfduplex-tcpip), with that
-repo's `include/tmp_v2.h`: 500 kbaud and acknowledged delivery. It is built
-in `~/tmptun` (`gcc -O2 -std=c11 -I. -o tmptun tmptun.c`), and
-`tmptun.service` runs `/home/admin/tmptun/tmptun /dev/ttyAMA3 tap0`. The
-builds it replaced are kept beside it as `*.no-retry`. The unit and recon
-must change baud rate together.
+The link runs at 500 kbaud: `trailer-monitor/protocol/tmp_v2.h` and
+`recon/tmptun/tmptun.c` (`B500000`) are set for it. Rebuild `tmptun` on recon
+(`make` in `recon/tmptun`) and restart `tmptun.service`; the unit and recon
+must change rate together.
 
 Updates need the TFTP service on recon (`trailer-monitor/ops/README.md`:
 `dnsmasq-base` and `vedc-tftp.service`) and `tools/vedc.py`. Before the unit
 goes on the bus, put the images it runs in `/srv/vedc`, so a fetch always
-finds a known-good pair. The unit runs the v8 application with the v4
+finds a known-good pair. The unit runs the v6 application with the v4
 bootloader: release 5 changed the VE port mapping, which the bootloader does
-not use; release 6 the 485 echo flush, which in the bootloader only slows a
-fetch now and then; release 8 acknowledged delivery, which the bootloader
-does without (it answers best effort). Release 7 was a trial, replaced by 8.
+not use, and release 6 the 485 echo flush, which in the bootloader only slows
+a fetch now and then.
 
 Still to change on recon:
 
@@ -259,15 +236,14 @@ Still to change on recon:
 
 ### Link diagnostics
 
-With acknowledged delivery a damaged frame is repaired by the next poll, so
-`ping` shows nothing of the wire. These look past it, from recon:
+Three tools look at the link from recon, past what `ping` can show (tmptun
+drops a bad reply silently, so a lost one only shows as a ~100 ms spike):
 
 | Tool | What it answers |
 |---|---|
 | `tools/vecapture.py` | Is each device streaming, and intact? Captures every port's TCP stream, checks each VE.Direct block's checksum and decodes the latest values. Runs alongside tmptun; a port with a client already gets refused. |
 | `tools/bustest.py` | Is the wire good, and which way does it fail? Plays the master in tmptun's place (`--manage-tmptun` stops and restarts it) and counts each poll as answered, CRC-failed, partial or silent: silent polls are the unit not hearing recon, CRC failures the reverse. Also listens to the idle line, and reads the UART's framing and overrun counters. |
-| `tmptun -v -t <s>` | What does the link do under its real master? recon's tmptun (halfduplex-tcpip) logs every failed exchange and prints totals: failures by kind, frames sent again, duplicates, the empty exchange's latency. `-f <n>` corrupts every nth frame-carrying reply on purpose, to prove the recovery. Run it in the service's place. |
-| `tools/tmptun-debug.c` | The same instrumentation on the pre-ARQ master, kept from the bring-up: it found the post-reply flush window fixed in release 6. |
+| `tools/tmptun-debug.c` | What does the link do under tmptun's own timing? tmptun with every timeout logged, and a gap (`min_gap_us`) to hold polls that follow a frame. Build on recon beside `common/tmp_v2.h`. |
 
 ```sh
 sudo tools/bustest.py --manage-tmptun        # ~25 s without the tunnel

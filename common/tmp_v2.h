@@ -28,16 +28,7 @@ enum tmp_type {
 };
 
 enum tmp_flag {
-    TMP_FLAG_COMPRESSED = 0x01u,
-    /* Acknowledged delivery, one frame in flight each way. A sender that sets
-     * ARQ also sets SEQ, the sequence bit of the frame it carries, and ACK, the
-     * sequence bit it expects next from the other end: ACK moving past the
-     * other end's frame is what acknowledges it. A frame not acknowledged by
-     * the next message is sent again in it; a frame whose SEQ is not the one
-     * expected was already taken, and is not taken twice. */
-    TMP_FLAG_ARQ        = 0x02u,
-    TMP_FLAG_SEQ        = 0x04u,
-    TMP_FLAG_ACK        = 0x08u
+    TMP_FLAG_COMPRESSED = 0x01u
 };
 #define TMP_DICT_ID_SHIFT       4u
 

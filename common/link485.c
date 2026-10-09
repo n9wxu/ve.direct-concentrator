@@ -18,18 +18,11 @@ static struct outbound_slot outbound[OUTBOUND_SLOTS];
 static uint8_t outbound_head;
 static uint8_t outbound_count;
 
-/* Acknowledged delivery (TMP_FLAG_ARQ), one frame in flight each way. */
-static bool     up_bit;          /* SEQ of the frame at the head of the queue      */
-static bool     up_in_flight;    /* the head went out, not yet acknowledged        */
-static bool     down_expected;   /* SEQ of the next new frame from the master      */
-
 static void (*before_reply)(void);
 static void (*tap)(bool transmitted, const uint8_t *data, size_t length);
 static uint32_t last_poll_ms;
 static bool     polled;
 static uint32_t frames;
-static uint32_t resends;
-static uint32_t duplicates;
 
 void link485_init(void)
 {
@@ -37,7 +30,6 @@ void link485_init(void)
     inbound_length = 0u;
     outbound_head = 0u;
     outbound_count = 0u;
-    up_bit = up_in_flight = down_expected = false;
     polled = false;
 }
 
@@ -61,27 +53,7 @@ uint32_t link485_frames(void)
     return frames;
 }
 
-uint32_t link485_resends(void)
-{
-    return resends;
-}
-
-uint32_t link485_duplicates(void)
-{
-    return duplicates;
-}
-
-static void dequeue(void)
-{
-    outbound_head = (uint8_t)((outbound_head + 1u) % OUTBOUND_SLOTS);
-    outbound_count--;
-    frames++;
-}
-
-/* The answer to a poll: the head of the queue, or nothing. Under ARQ the head
- * stays queued until the master acknowledges it, so an answer the master
- * missed goes again with the next poll; without ARQ it is gone once sent. */
-static void reply(uint8_t sequence, bool arq)
+static void reply(uint8_t sequence)
 {
     static uint8_t wire[1u + TMP_FRAME_OVERHEAD + CFG_NET_FRAME];
     const uint8_t *payload = NULL;
@@ -90,26 +62,19 @@ static void reply(uint8_t sequence, bool arq)
         payload = outbound[outbound_head].bytes;
         length = outbound[outbound_head].length;
     }
-    uint8_t flags = tmp_flags(false, 0u);
-    if (arq) {
-        flags |= TMP_FLAG_ARQ | (up_bit ? TMP_FLAG_SEQ : 0u) | (down_expected ? TMP_FLAG_ACK : 0u);
-        if (length != 0u) {
-            resends += up_in_flight;
-            up_in_flight = true;
-        }
-    }
     wire[0] = 0xFFu;   /* preamble: absorbs the transceivers' turnaround */
-    const size_t wire_length = 1u + tmp_frame_build(&wire[1], TMP_NET, TMP_ADDR_COLLECTOR, sequence,
-                                                    flags, payload, length);
-    rs485_send(wire, wire_length);
+    const size_t wire_length = tmp_frame_build(&wire[1], TMP_NET, TMP_ADDR_COLLECTOR, sequence,
+                                               tmp_flags(false, 0u), payload, length);
+    rs485_send(wire, wire_length + 1u);
     if (tap != NULL) {
-        tap(true, wire, wire_length);
+        tap(true, wire, wire_length + 1u);
     }
-    if (!arq && length != 0u) {
-        dequeue();
+    if (outbound_count != 0u) {
+        outbound_head = (uint8_t)((outbound_head + 1u) % OUTBOUND_SLOTS);
+        outbound_count--;
+        frames++;
     }
-    /* Whatever the scanner held came before our reply: start the next frame clean.
-     * Bytes of the next poll may already be in the ring; they are kept. */
+    /* rs485_send() dropped the echo, and with it anything half-parsed. */
     tmp_scanner_reset(&scanner);
 }
 
@@ -147,40 +112,14 @@ void link485_service(void)
 
     polled = true;
     last_poll_ms = hal_millis();
-    const bool arq = (inbound.flags & TMP_FLAG_ARQ) != 0u;
-    if (arq) {
-        /* The master's ACK moved past our frame: it arrived. If not, it goes
-         * again in this reply. */
-        const bool ack = (inbound.flags & TMP_FLAG_ACK) != 0u;
-        if (up_in_flight && ack != up_bit) {
-            dequeue();
-            up_bit = !up_bit;
-            up_in_flight = false;
-        }
-        /* The master's frame: new if its SEQ is the one we expect; otherwise
-         * we took it already and only our acknowledgement was lost. */
-        if (inbound.length != 0u) {
-            const bool seq = (inbound.flags & TMP_FLAG_SEQ) != 0u;
-            if (seq == down_expected) {
-                inbound_length = inbound.length;
-                down_expected = !down_expected;
-                frames++;
-            } else {
-                duplicates++;
-            }
-        }
-    } else {
-        /* A master without ARQ: best effort, and nothing of ours in flight. */
-        up_in_flight = false;
-        inbound_length = inbound.length;
-        if (inbound_length != 0u) {
-            frames++;
-        }
+    inbound_length = inbound.length;
+    if (inbound_length != 0u) {
+        frames++;
     }
     if (before_reply != NULL) {
         before_reply();
     }
-    reply(inbound.sequence, arq);
+    reply(inbound.sequence);
 }
 
 /* ── MAC driver ─────────────────────────────────────────────────────── */
