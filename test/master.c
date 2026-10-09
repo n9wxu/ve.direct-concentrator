@@ -122,13 +122,18 @@ size_t ethernet(uint8_t *frame, const uint8_t *destination, uint16_t type)
 
 size_t ipv4(uint8_t *frame, uint8_t protocol, size_t payload_length)
 {
+    return ipv4_from(frame, MASTER_IP, protocol, payload_length);
+}
+
+size_t ipv4_from(uint8_t *frame, uint32_t source, uint8_t protocol, size_t payload_length)
+{
     uint8_t *ip = frame + ethernet(frame, unit_mac, 0x0800u);
     memset(ip, 0, 20);
     ip[0] = 0x45u;
     put16(ip + 2, (uint16_t)(20u + payload_length));
     ip[8] = 64u;
     ip[9] = protocol;
-    put32(ip + 12, MASTER_IP);
+    put32(ip + 12, source);
     put32(ip + 16, CFG_IP_ADDR);
     put16(ip + 10, checksum(ip, 20u, 0u));
     return 34u;
@@ -136,6 +141,11 @@ size_t ipv4(uint8_t *frame, uint8_t protocol, size_t payload_length)
 
 uint32_t pseudo_header(uint8_t protocol, size_t length)
 {
-    return (MASTER_IP >> 16) + (MASTER_IP & 0xFFFFu) + (CFG_IP_ADDR >> 16) + (CFG_IP_ADDR & 0xFFFFu)
+    return pseudo_header_from(MASTER_IP, protocol, length);
+}
+
+uint32_t pseudo_header_from(uint32_t source, uint8_t protocol, size_t length)
+{
+    return (source >> 16) + (source & 0xFFFFu) + (CFG_IP_ADDR >> 16) + (CFG_IP_ADDR & 0xFFFFu)
          + protocol + (uint32_t)length;
 }

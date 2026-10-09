@@ -4,10 +4,11 @@ include(FetchContent)
 # packages' build files are not used (SOURCE_SUBDIR names a directory that does
 # not exist).
 
+# tcp_retransmit() (smallest_tcp 0.2.0, for app/tcplink.c): until that is
+# released, the commit of smallest_tcp pull request 14.
 FetchContent_Declare(smallest_tcp
     GIT_REPOSITORY https://github.com/n9wxu/smallest_tcp.git
-    GIT_TAG        v0.1.10
-    GIT_SHALLOW    TRUE
+    GIT_TAG        bd441b6895339b28b6baa6f70843b8a618a16796
     SOURCE_SUBDIR  _sources_only)
 FetchContent_MakeAvailable(smallest_tcp)
 

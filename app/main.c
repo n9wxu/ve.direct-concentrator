@@ -3,6 +3,7 @@
 #include "control.h"
 #include "ledtest.h"
 #include "linkcheck.h"
+#include "tcplink.h"
 #include "fota.h"
 #include "hal.h"
 #include "link485.h"
@@ -89,6 +90,7 @@ int main(void)
     tcp_set_connections(&net, connections, VE_PORT_COUNT + 1u);
     veports_set_tap(vemock_tap);
     linkcheck_init(&net);
+    tcplink_init(&net);        /* recon's polls are TCP's clock on the link */
     usbmon_init();
     __enable_irq();
 

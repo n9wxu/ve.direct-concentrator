@@ -19,10 +19,12 @@ static uint8_t outbound_head;
 static uint8_t outbound_count;
 
 static void (*before_reply)(void);
+static void (*on_idle_poll)(void);
 static void (*tap)(bool transmitted, const uint8_t *data, size_t length);
 static uint32_t last_poll_ms;
 static bool     polled;
 static uint32_t frames;
+static uint32_t idle_polls;
 
 void link485_init(void)
 {
@@ -36,6 +38,11 @@ void link485_init(void)
 void link485_set_before_reply(void (*hook)(void))
 {
     before_reply = hook;
+}
+
+void link485_set_on_idle_poll(void (*hook)(void))
+{
+    on_idle_poll = hook;
 }
 
 void link485_set_tap(void (*function)(bool, const uint8_t *, size_t))
@@ -53,6 +60,11 @@ uint32_t link485_frames(void)
     return frames;
 }
 
+uint32_t link485_idle_polls(void)
+{
+    return idle_polls;
+}
+
 static void reply(uint8_t sequence)
 {
     static uint8_t wire[1u + TMP_FRAME_OVERHEAD + CFG_NET_FRAME];
@@ -63,18 +75,19 @@ static void reply(uint8_t sequence)
         length = outbound[outbound_head].length;
     }
     wire[0] = 0xFFu;   /* preamble: absorbs the transceivers' turnaround */
-    const size_t wire_length = tmp_frame_build(&wire[1], TMP_NET, TMP_ADDR_COLLECTOR, sequence,
-                                               tmp_flags(false, 0u), payload, length);
-    rs485_send(wire, wire_length + 1u);
+    const size_t wire_length = 1u + tmp_frame_build(&wire[1], TMP_NET, TMP_ADDR_COLLECTOR, sequence,
+                                                    tmp_flags(false, 0u), payload, length);
+    rs485_send(wire, wire_length);
     if (tap != NULL) {
-        tap(true, wire, wire_length + 1u);
+        tap(true, wire, wire_length);
     }
     if (outbound_count != 0u) {
         outbound_head = (uint8_t)((outbound_head + 1u) % OUTBOUND_SLOTS);
         outbound_count--;
         frames++;
     }
-    /* rs485_send() dropped the echo, and with it anything half-parsed. */
+    /* Whatever the scanner held came before our reply: start the next frame clean.
+     * Bytes of the next poll may already be in the ring; they are kept. */
     tmp_scanner_reset(&scanner);
 }
 
@@ -115,6 +128,12 @@ void link485_service(void)
     inbound_length = inbound.length;
     if (inbound_length != 0u) {
         frames++;
+    } else if (outbound_count == 0u) {
+        /* The master has nothing more for us, and everything we sent has gone. */
+        idle_polls++;
+        if (on_idle_poll != NULL) {
+            on_idle_poll();
+        }
     }
     if (before_reply != NULL) {
         before_reply();

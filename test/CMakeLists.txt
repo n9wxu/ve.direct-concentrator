@@ -10,7 +10,8 @@ target_include_directories(master PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOU
 target_link_libraries(master PUBLIC stack_host)
 target_compile_options(master PRIVATE -Wall -Wextra)
 
-add_executable(test_link test_link.c)
+add_executable(test_link test_link.c ${CMAKE_SOURCE_DIR}/app/tcplink.c)
+target_include_directories(test_link PRIVATE ${CMAKE_SOURCE_DIR}/app)
 target_link_libraries(test_link PRIVATE master)
 target_compile_options(test_link PRIVATE -Wall -Wextra)
 add_test(NAME link COMMAND test_link)

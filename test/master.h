@@ -47,5 +47,8 @@ void     put32(uint8_t *at, uint32_t value);
 size_t   ethernet(uint8_t *frame, const uint8_t *destination, uint16_t type);
 size_t   ipv4(uint8_t *frame, uint8_t protocol, size_t payload_length);
 uint32_t pseudo_header(uint8_t protocol, size_t length);
+/* The same from another source address: a host beyond recon. */
+size_t   ipv4_from(uint8_t *frame, uint32_t source, uint8_t protocol, size_t payload_length);
+uint32_t pseudo_header_from(uint32_t source, uint8_t protocol, size_t length);
 
 #endif

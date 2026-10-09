@@ -7,6 +7,7 @@
 #include "link485.h"
 #include "master.h"
 #include "tcp.h"
+#include "tcplink.h"
 #include "udp.h"
 
 static void echo(net_t *n, uint32_t source_ip, uint16_t source_port, const uint8_t *source_mac,
@@ -23,6 +24,49 @@ static tcp_saw_rx_ctx_t from_client;
 static uint8_t          to_client_bytes[512], from_client_bytes[128];
 
 static int tap_received, tap_transmitted;
+
+#define FAR_IP NET_IPV4(192, 168, 7, 9)   /* a host beyond recon, routed */
+
+static tcp_conn_t       far;
+static tcp_saw_tx_ctx_t far_out;
+static tcp_saw_rx_ctx_t far_in;
+static uint8_t          far_out_bytes[512], far_in_bytes[128];
+
+/* A TCP segment to the unit; returns the frame's length. */
+static size_t tcp_frame(uint8_t *frame, uint32_t source, uint16_t source_port,
+                        uint16_t port, uint32_t seq, uint32_t ack, uint8_t flags,
+                        const char *data)
+{
+    const size_t data_length = data != NULL ? strlen(data) : 0u;
+    const size_t length = ipv4_from(frame, source, 6u, 20u + data_length);
+    uint8_t *tcp = frame + length;
+    memset(tcp, 0, 20);
+    put16(tcp, source_port);
+    put16(tcp + 2, port);
+    put32(tcp + 4, seq);
+    put32(tcp + 8, ack);
+    tcp[12] = 0x50u;
+    tcp[13] = flags;
+    put16(tcp + 14, 4096u);
+    memcpy(tcp + 20, data, data_length);
+    put16(tcp + 16, checksum(tcp, 20u + data_length,
+                             pseudo_header_from(source, 6u, 20u + data_length)));
+    return length + 20u + data_length;
+}
+
+/* The unit's answer is a TCP segment from `port` with at least `flags`. */
+static bool is_tcp_from(const struct tmp_frame *frame, uint16_t port, uint8_t flags)
+{
+    return frame->length >= 54u && frame->payload[12] == 0x08u && frame->payload[23] == 6u
+        && get_be16(&frame->payload[34]) == port
+        && (frame->payload[34 + 13] & flags) == flags;
+}
+
+static int idle_polls_heard;
+static void count_idle_poll(void)
+{
+    idle_polls_heard++;
+}
 
 static void tap(bool transmitted, const uint8_t *data, size_t length)
 {
@@ -129,6 +173,7 @@ int main(void)
     CHECK(answer.payload[23] == 6u);
     CHECK(answer.payload[34 + 13] == (TCP_FLAG_SYN | TCP_FLAG_ACK));
     CHECK(get_be32(&answer.payload[34 + 8]) == 1001u);
+    const uint32_t unit_iss = get_be32(&answer.payload[34 + 4]);
     CHECK(answer.payload[54] == TCP_OPT_MSS);
     CHECK(get_be16(&answer.payload[56]) <= CFG_NET_FRAME - 54u);
     CHECK(connection.state == TCP_SYN_RECEIVED);
@@ -146,6 +191,73 @@ int main(void)
         carried += (answer.length != 0u);
     }
     CHECK(carried == 6);
+
+    /* The idle-poll hook hears a poll with no frame for us while nothing of
+     * ours waits to go: not a poll that carries a frame, not while our
+     * answer to it waits. */
+    link485_set_on_idle_poll(count_idle_poll);
+    poll(TMP_ADDR_COLLECTOR, NULL, 0u);
+    CHECK(idle_polls_heard == 1);
+    length = ipv4(frame, 1u, 8u + 4u);                     /* a ping: a frame */
+    memset(frame + length, 0, 8); frame[length] = 8u;
+    memcpy(frame + length + 8, "idle", 4);
+    put16(frame + length + 2, checksum(frame + length, 12u, 0u));
+    poll(TMP_ADDR_COLLECTOR, frame, length + 12u);
+    CHECK(idle_polls_heard == 1);
+    poll(TMP_ADDR_COLLECTOR, NULL, 0u);                       /* the echo reply waits */
+    CHECK(idle_polls_heard == 1 && answered && answer.length >= 46u);
+    poll(TMP_ADDR_COLLECTOR, NULL, 0u);
+    CHECK(idle_polls_heard == 2);
+
+    /* TCP on the link: the poll is the clock (tcplink). The SYN+ACK above was
+     * never acknowledged: the next idle poll sends it again. */
+    tcplink_init(&net);
+    uint32_t retransmitted = tcplink_retransmissions();
+    poll(TMP_ADDR_COLLECTOR, NULL, 0u);
+    CHECK(answered && is_tcp_from(&answer, CFG_VE_PORT_BASE, TCP_FLAG_SYN | TCP_FLAG_ACK));
+    CHECK(get_be32(&answer.payload[34 + 4]) == unit_iss);
+    CHECK(tcplink_retransmissions() == ++retransmitted);
+    /* Acknowledged: established, and nothing goes again. */
+    poll(TMP_ADDR_COLLECTOR, frame,
+         tcp_frame(frame, MASTER_IP, 40001u, CFG_VE_PORT_BASE, 1001u, unit_iss + 1u, TCP_FLAG_ACK,
+                   NULL));
+    CHECK(connection.state == TCP_ESTABLISHED);
+    poll(TMP_ADDR_COLLECTOR, NULL, 0u);
+    CHECK(answered && answer.length == 0u && tcplink_retransmissions() == retransmitted);
+    /* Data: it goes out, recon never gets it intact, so the next
+     * poll is idle and it goes again; acknowledged, it stops. */
+    CHECK(tcp_send(&net, &connection, (const uint8_t *)"hello", 5u) == 5);
+    poll(TMP_ADDR_COLLECTOR, NULL, 0u);
+    CHECK(answered && is_tcp_from(&answer, CFG_VE_PORT_BASE, TCP_FLAG_ACK));
+    CHECK(answer.length == 54u + 5u && memcmp(answer.payload + 54, "hello", 5) == 0);
+    poll(TMP_ADDR_COLLECTOR, NULL, 0u);
+    CHECK(answered && answer.length == 54u + 5u && memcmp(answer.payload + 54, "hello", 5) == 0);
+    CHECK(get_be32(&answer.payload[34 + 4]) == unit_iss + 1u);
+    CHECK(tcplink_retransmissions() == ++retransmitted);
+    poll(TMP_ADDR_COLLECTOR, frame,
+         tcp_frame(frame, MASTER_IP, 40001u, CFG_VE_PORT_BASE, 1001u, unit_iss + 6u, TCP_FLAG_ACK,
+                   NULL));
+    poll(TMP_ADDR_COLLECTOR, NULL, 0u);
+    CHECK(answered && answer.length == 0u && tcplink_retransmissions() == retransmitted);
+
+    /* A peer beyond recon answers when it answers: its connection keeps
+     * TCP's own timer, and an idle poll sends nothing again. */
+    {
+        static tcp_conn_t *both[2] = { &connection, &far };
+        tcp_saw_tx_init(&far_out, far_out_bytes, sizeof far_out_bytes);
+        tcp_saw_rx_init(&far_in, far_in_bytes, sizeof far_in_bytes);
+        CHECK(tcp_conn_init(&far, &tcp_saw_tx_ops, &far_out, &tcp_saw_rx_ops, &far_in, NULL)
+              == NET_OK);
+        CHECK(tcp_listen(&far, CFG_VE_PORT_BASE + 1u) == NET_OK);
+        tcp_set_connections(&net, both, 2);
+        poll(TMP_ADDR_COLLECTOR, frame,
+             tcp_frame(frame, FAR_IP, 40002u, CFG_VE_PORT_BASE + 1u, 5000u, 0u, TCP_FLAG_SYN, NULL));
+        CHECK(far.state == TCP_SYN_RECEIVED);
+        poll(TMP_ADDR_COLLECTOR, NULL, 0u);                   /* the SYN+ACK goes out */
+        CHECK(answered && answer.length != 0u);
+        poll(TMP_ADDR_COLLECTOR, NULL, 0u);
+        CHECK(answered && answer.length == 0u && tcplink_retransmissions() == retransmitted);
+    }
 
     printf("link: ok\n");
     return 0;

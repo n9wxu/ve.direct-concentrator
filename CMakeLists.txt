@@ -7,7 +7,7 @@ project(vedirect_concentrator C)
 #   cmake -B build-host && cmake --build build-host && ctest --test-dir build-host
 
 # Reported by "status" and stored in each image. Bump for every release.
-set(VEDC_VERSION 6 CACHE STRING "Version number stored in the images")
+set(VEDC_VERSION 10 CACHE STRING "Version number stored in the images")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)
@@ -92,7 +92,7 @@ target_link_libraries(tinyusb PUBLIC samd21)
 target_compile_options(tinyusb PRIVATE -w)
 
 add_executable(vedc-app app/main.c app/veports.c app/control.c app/loadctl.c app/loads.c
-               app/usbmon.c app/vemock.c app/ledtest.c app/usb_descriptors.c
+               app/tcplink.c app/usbmon.c app/vemock.c app/ledtest.c app/usb_descriptors.c
                common/linkcheck.c ${COMMON_SOURCES})
 target_include_directories(vedc-app PRIVATE common app)
 target_compile_definitions(vedc-app PRIVATE IMAGE_MAGIC=IMAGE_MAGIC_APP

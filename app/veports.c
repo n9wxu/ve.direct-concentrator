@@ -162,7 +162,10 @@ void veports_service(void)
                 port->gone = 1u;
             }
         }
-        if (port->gone) {
+        /* A connection the stack closed without telling us (a reset in
+         * LAST-ACK: Linux answers our FIN so when data reached a socket its
+         * application had closed) listens again too. */
+        if (port->gone || port->connection.state == TCP_CLOSED) {
             listen(port);
         }
         device_to_client(port, now);

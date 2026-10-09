@@ -196,6 +196,20 @@ int main(void)
     CHECK(loadctl_connected());
     CHECK(strcmp(received, "out 2 sense 3300 3300\n") == 0);
 
+    /* The client closes, our FIN goes, and the client answers it with a
+     * reset instead of an ACK (Linux does, when data reaches a socket its
+     * application has closed). The stack closes the connection without an
+     * event; the port listens again all the same. */
+    acknowledge();
+    send_segment(TCP_FLAG_FIN | TCP_FLAG_ACK, NULL);
+    CHECK(unit_flags & TCP_FLAG_FIN);
+    send_segment(TCP_FLAG_RST, NULL);
+    CHECK(!loadctl_connected());
+    collect();
+    client_port++;
+    CHECK(open_session() == 0);
+    CHECK(loadctl_connected());
+
     printf("loadctl: ok\n");
     return 0;
 }

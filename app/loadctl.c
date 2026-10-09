@@ -227,7 +227,8 @@ void loadctl_service(void)
             gone = 1u;
         }
     }
-    if (gone) {
+    /* Closed without an event too (a reset in LAST-ACK): listen again. */
+    if (gone || connection.state == TCP_CLOSED) {
         listen();
         return;
     }
