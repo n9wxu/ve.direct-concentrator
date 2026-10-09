@@ -12,9 +12,9 @@
  *   485 RX      D0        PA11   SERCOM0 pad 3
  *   485 DE      D3        PA09
  *   485 LED     D7        PA21
- *   VE1 TX/RX   D10/D12   PA18/PA19   SERCOM1 pad 2/3         LED A4  PA05
- *   VE2 TX/RX   D2/D5     PA14/PA15   SERCOM2 pad 2/3         LED D11 PA16
- *   VE3 TX/RX   SDA/SCL   PA22/PA23   SERCOM3 pad 0/1         LED D13 PA17
+ *   VE1 TX/RX   D2/D5     PA14/PA15   SERCOM2 pad 2/3         LED A4  PA05
+ *   VE2 TX/RX   SDA/SCL   PA22/PA23   SERCOM3 pad 0/1         LED D11 PA16
+ *   VE3 TX/RX   D10/D12   PA18/PA19   SERCOM1 pad 2/3         LED D13 PA17
  *   VE4 TX/RX   A1/A2     PB08/PB09   SERCOM4 pad 0/1 (mux D) LED D6  PA20
  *   Load 1      D8 drive  PA06, A0 current sense PA02 (AIN0)
  *   Load 2      D9 drive  PA07, A3 current sense PA04 (AIN4)
@@ -22,7 +22,8 @@
  *   USB LED     RX LED    PB03   lit when low, as on the Zero
  *   USB D-/D+             PA24/PA25
  *
- * Ports are numbered as on the board, and port n is SERCOM n. */
+ * Ports are numbered as on the board's connectors, which is not the SERCOM
+ * order: connector 1 is SERCOM2, 2 is SERCOM3, 3 is SERCOM1 (common/uart.c). */
 
 #define PIN(port, number)   ((uint8_t)(((port) << 5) | (number)))
 #define PORT_A  0u

@@ -31,14 +31,16 @@ static uint8_t tx_ve[4][RING_VE_TX];
 #define MUX_C 2u
 #define MUX_D 3u
 
+/* VE ports follow the board's connector numbers, not the SERCOM numbers
+ * (board.h): connector 1 is SERCOM2, 2 is SERCOM3, 3 is SERCOM1. */
 static struct uart uarts[UART_COUNT] = {
     [UART_485] = { SERCOM0, 0, PIN(PORT_A, 10), PIN(PORT_A, 11), MUX_C, 2, 3,
                    { rx485, RING_485_RX - 1u, 0, 0 }, { 0, 0, 0, 0 }, 0 },
-    [UART_VE1] = { SERCOM1, 1, PIN(PORT_A, 18), PIN(PORT_A, 19), MUX_C, 2, 3,
+    [UART_VE1] = { SERCOM2, 2, PIN(PORT_A, 14), PIN(PORT_A, 15), MUX_C, 2, 3,
                    { rx_ve[0], RING_VE_RX - 1u, 0, 0 }, { tx_ve[0], RING_VE_TX - 1u, 0, 0 }, 0 },
-    [UART_VE2] = { SERCOM2, 2, PIN(PORT_A, 14), PIN(PORT_A, 15), MUX_C, 2, 3,
+    [UART_VE2] = { SERCOM3, 3, PIN(PORT_A, 22), PIN(PORT_A, 23), MUX_C, 0, 1,
                    { rx_ve[1], RING_VE_RX - 1u, 0, 0 }, { tx_ve[1], RING_VE_TX - 1u, 0, 0 }, 0 },
-    [UART_VE3] = { SERCOM3, 3, PIN(PORT_A, 22), PIN(PORT_A, 23), MUX_C, 0, 1,
+    [UART_VE3] = { SERCOM1, 1, PIN(PORT_A, 18), PIN(PORT_A, 19), MUX_C, 2, 3,
                    { rx_ve[2], RING_VE_RX - 1u, 0, 0 }, { tx_ve[2], RING_VE_TX - 1u, 0, 0 }, 0 },
     [UART_VE4] = { SERCOM4, 4, PIN(PORT_B, 8), PIN(PORT_B, 9), MUX_D, 0, 1,
                    { rx_ve[3], RING_VE_RX - 1u, 0, 0 }, { tx_ve[3], RING_VE_TX - 1u, 0, 0 }, 0 },
@@ -116,9 +118,9 @@ static void interrupt(struct uart *uart)
 }
 
 void SERCOM0_Handler(void) { interrupt(&uarts[UART_485]); }
-void SERCOM1_Handler(void) { interrupt(&uarts[UART_VE1]); }
-void SERCOM2_Handler(void) { interrupt(&uarts[UART_VE2]); }
-void SERCOM3_Handler(void) { interrupt(&uarts[UART_VE3]); }
+void SERCOM1_Handler(void) { interrupt(&uarts[UART_VE3]); }
+void SERCOM2_Handler(void) { interrupt(&uarts[UART_VE1]); }
+void SERCOM3_Handler(void) { interrupt(&uarts[UART_VE2]); }
 void SERCOM4_Handler(void) { interrupt(&uarts[UART_VE4]); }
 
 size_t uart_rx_available(enum uart_id id)

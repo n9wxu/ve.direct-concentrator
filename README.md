@@ -59,7 +59,7 @@ out 1 sense 418 1
 
 Each VE.Direct LED blinks with its port's traffic, in either direction (a
 device sending its once-a-second text block shows one blink a second): port 1
-(RX D12) on A4, port 2 (RX D5) on D11, port 3 (RX SCL) on D13, port 4 (RX A2)
+(RX D5) on A4, port 2 (RX SCL) on D11, port 3 (RX D12) on D13, port 4 (RX A2)
 on D6.
 
 The 485 LED (D7) blinks with Ethernet frames crossing the bus, either way; the
@@ -222,9 +222,10 @@ must change rate together.
 
 Updates need the TFTP service on recon (`trailer-monitor/ops/README.md`:
 `dnsmasq-base` and `vedc-tftp.service`) and `tools/vedc.py`. Before the unit
-goes on the bus, put the images it runs (`build/vedc-app.bin` and
-`build/vedc-boot.bin`, release 4) in `/srv/vedc`, so a fetch always finds a
-known-good pair.
+goes on the bus, put the images it runs in `/srv/vedc`, so a fetch always
+finds a known-good pair. Release 5 changed only the VE port mapping, which the
+bootloader does not use, so the unit runs the v5 application with the v4
+bootloader.
 
 Still to change on recon:
 
