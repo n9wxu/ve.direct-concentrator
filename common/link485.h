@@ -13,8 +13,10 @@
  * Frames damaged on the wire are retried by the MAC: the master sends a poll
  * whose answer it did not get intact again, flagged TMP_FLAG_RETRY, and we
  * answer it with the same frame; a poll we did not hear, it sends again. A
- * frame that cannot be queued is dropped and TCP or the application retries,
- * as on Ethernet. */
+ * poll for us that went bad (its CRC failed, or it stopped short) gets a NAK
+ * once the bus is quiet, so the master sends it again at once instead of
+ * waiting out its response window. A frame that cannot be queued is dropped
+ * and TCP or the application retries, as on Ethernet. */
 
 extern const net_mac_t link485_mac;
 
@@ -42,5 +44,8 @@ uint32_t link485_frames(void);
 /* Polls answered again since reset: MAC retries by recon, after our answer
  * reached it damaged or not at all. */
 uint32_t link485_retries(void);
+
+/* Polls for us that went bad and got a NAK, since reset. */
+uint32_t link485_naks(void);
 
 #endif

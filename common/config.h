@@ -29,6 +29,15 @@
 #define CFG_485_TURNAROUND_US 1000u
 #endif
 
+/* Quiet on the bus after a poll for us that went bad (its CRC failed, or it
+ * stopped short) before we answer it with a NAK; a frame cut short is
+ * dropped then too. In hal_millis() ticks, so the quiet is at least one tick
+ * less: 1-2 ms, 50 bytes' time and more. recon never pauses that long inside
+ * a poll. */
+#ifndef CFG_LINK_QUIET_MS
+#define CFG_LINK_QUIET_MS   2u
+#endif
+
 /* No answer from recon for this long (linkcheck.h): reset, through the
  * bootloader's window. Long enough to ride out a recon reboot; a reset
  * leaves the loads off. */

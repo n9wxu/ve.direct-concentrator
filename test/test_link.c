@@ -58,7 +58,9 @@ int main(void)
     now_ms = 25u;
     CHECK(link485_poll_age_ms() == 25u);
 
-    /* Polls for another address, and corrupted ones, get silence. */
+    /* Polls for another address get silence. A corrupted poll for us gets a
+     * NAK with its SEQ, but only once the bus has been quiet for
+     * CFG_LINK_QUIET_MS: until then more of it may be coming. */
     poll(0x02u, NULL, 0u);
     CHECK(!answered && wire_out_length == 0u);
     {
@@ -68,6 +70,39 @@ int main(void)
         wire[10] ^= 0x40u;
         exchange_raw(wire, wire_length);
         CHECK(!answered && wire_out_length == 0u);
+        quiet(CFG_LINK_QUIET_MS - 1u);
+        CHECK(!answered && wire_out_length == 0u);
+        quiet(1u);
+        CHECK(answered && answer.type == TMP_NAK && answer.sequence == 9u);
+        CHECK(answer.address == TMP_ADDR_COLLECTOR && answer.length == 0u);
+        CHECK(wire_out[0] == 0xFFu && link485_naks() == 1u);
+        quiet(CFG_LINK_QUIET_MS);                           /* once */
+        CHECK(!answered && wire_out_length == 0u);
+        /* Not for a corrupted poll to another address, or to broadcast: a
+         * damaged byte can make any frame look like one. */
+        for (int index = 0; index < 2; index++) {
+            uint8_t other[64];
+            const size_t other_length = tmp_frame_build(other, TMP_POLL,
+                                                        index == 0 ? 0x02u : TMP_ADDR_BROADCAST,
+                                                        9u, 0u, (const uint8_t *)"abcdef", 6u);
+            other[10] ^= 0x40u;
+            exchange_raw(other, other_length);
+            quiet(CFG_LINK_QUIET_MS);
+            CHECK(!answered && wire_out_length == 0u);
+        }
+        CHECK(link485_naks() == 1u);
+        /* A good poll before the bus went quiet is the one answered, and the
+         * bad one before it gets no NAK. */
+        {
+            uint8_t both[128];
+            memcpy(both, wire, wire_length);
+            const size_t good_length = tmp_frame_build(both + wire_length, TMP_POLL,
+                                                       TMP_ADDR_COLLECTOR, 10u, 0u, NULL, 0u);
+            exchange_raw(both, wire_length + good_length);
+            CHECK(answered && answer.type == TMP_NET && answer.sequence == 10u);
+            quiet(CFG_LINK_QUIET_MS);
+            CHECK(!answered && wire_out_length == 0u && link485_naks() == 1u);
+        }
         /* ... and the link recovers on the next good frame, even after noise. */
         wire[10] ^= 0x40u;
         memmove(wire + 3, wire, wire_length);
@@ -210,6 +245,95 @@ int main(void)
         CHECK(answered && answer.length == 0u && link485_retries() == before);
         poll(TMP_ADDR_COLLECTOR, NULL, 0u);
         CHECK(answered && answer.length >= 46u && memcmp(answer.payload + 42, "rtry", 4) == 0);
+
+        /* A poll that went bad on the wire (its CRC broken) gets a NAK once
+         * the bus is quiet, and its frame is not taken. The master sends it
+         * again with TMP_FLAG_RETRY; to us, who never answered that SEQ, it is
+         * new, and its frame is taken once. */
+        {
+            uint8_t wire[128];
+            const uint32_t naks = link485_naks();
+            sequence++;
+            const size_t wire_length = tmp_frame_build(wire, TMP_POLL, TMP_ADDR_COLLECTOR,
+                                                       sequence, tmp_flags(false, 0u), frame,
+                                                       length);
+            wire[wire_length - 1u] ^= 0xFFu;
+            exchange_raw(wire, wire_length);
+            CHECK(!answered);
+            quiet(CFG_LINK_QUIET_MS);
+            CHECK(answered && answer.type == TMP_NAK && answer.sequence == sequence);
+            CHECK(link485_naks() == naks + 1u);
+            retry(TMP_ADDR_COLLECTOR, frame, length);
+            CHECK(answered && answer.type == TMP_NET && answer.length == 0u);
+            poll(TMP_ADDR_COLLECTOR, NULL, 0u);
+            CHECK(answered && answer.length >= 46u && memcmp(answer.payload + 42, "rtry", 4) == 0);
+            poll(TMP_ADDR_COLLECTOR, NULL, 0u);
+            CHECK(answered && answer.length == 0u);              /* one echo */
+        }
+
+        /* A NAK leaves our last reply as it was: a retry that went bad itself
+         * is NAKed, and the next retry still gets the same reply, whose frame
+         * leaves only with a new poll. */
+        {
+            uint8_t wire[64];
+            (void)udp_send(&net, MASTER_IP, master_mac, CFG_CONTROL_PORT, 40000u,
+                           (const uint8_t *)"nak", 3u);
+            poll(TMP_ADDR_COLLECTOR, NULL, 0u);
+            CHECK(answered && answer.length == 42u + 3u && memcmp(answer.payload + 42, "nak", 3) == 0);
+            const size_t first_length = wire_out_length;
+            memcpy(first, wire_out, first_length);
+            const size_t wire_length = tmp_frame_build(wire, TMP_POLL, TMP_ADDR_COLLECTOR,
+                                                       sequence,
+                                                       (uint8_t)(tmp_flags(false, 0u)
+                                                                 | TMP_FLAG_RETRY), NULL, 0u);
+            wire[wire_length - 1u] ^= 0xFFu;
+            exchange_raw(wire, wire_length);
+            quiet(CFG_LINK_QUIET_MS);
+            CHECK(answered && answer.type == TMP_NAK && answer.sequence == sequence);
+            retry(TMP_ADDR_COLLECTOR, NULL, 0u);
+            CHECK(answered && wire_out_length == first_length);
+            CHECK(memcmp(wire_out, first, first_length) == 0);
+            poll(TMP_ADDR_COLLECTOR, NULL, 0u);
+            CHECK(answered && answer.length == 0u);
+        }
+
+        /* A poll whose length field went bad stops short of it: we wait for
+         * the rest, and when the bus goes quiet, NAK it and start over, so
+         * the master's next try is heard. A frame for another address cut
+         * short is dropped the same way, without a NAK. A pause inside a
+         * frame shorter than the quiet does not cut it. */
+        {
+            uint8_t wire[64];
+            const uint32_t naks = link485_naks();
+            sequence++;
+            size_t wire_length = tmp_frame_build(wire, TMP_POLL, TMP_ADDR_COLLECTOR, sequence,
+                                                 tmp_flags(false, 0u), (const uint8_t *)"abc", 3u);
+            wire[6] = 0x01u;                                     /* LEN 3 -> 259 */
+            exchange_raw(wire, wire_length);
+            CHECK(!answered && wire_out_length == 0u);
+            quiet(CFG_LINK_QUIET_MS);
+            CHECK(answered && answer.type == TMP_NAK && answer.sequence == sequence);
+            CHECK(link485_naks() == naks + 1u);
+            retry(TMP_ADDR_COLLECTOR, NULL, 0u);
+            CHECK(answered && answer.type == TMP_NET && answer.sequence == sequence);
+
+            wire_length = tmp_frame_build(wire, TMP_POLL, 0x02u, 1u, 0u, (const uint8_t *)"abc", 3u);
+            exchange_raw(wire, wire_length - 2u);
+            quiet(CFG_LINK_QUIET_MS);
+            CHECK(!answered && link485_naks() == naks + 1u);
+            poll(TMP_ADDR_COLLECTOR, NULL, 0u);
+            CHECK(answered && answer.type == TMP_NET && answer.sequence == sequence);
+
+            sequence++;
+            wire_length = tmp_frame_build(wire, TMP_POLL, TMP_ADDR_COLLECTOR, sequence,
+                                          tmp_flags(false, 0u), (const uint8_t *)"abc", 3u);
+            exchange_raw(wire, 9u);
+            quiet(CFG_LINK_QUIET_MS - 1u);
+            CHECK(!answered);
+            exchange_raw(wire + 9, wire_length - 9u);
+            CHECK(answered && answer.type == TMP_NET && answer.sequence == sequence);
+            CHECK(link485_naks() == naks + 1u);
+        }
     }
 
     printf("link: ok\n");

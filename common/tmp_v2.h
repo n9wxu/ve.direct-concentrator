@@ -75,6 +75,33 @@ static inline uint8_t tmp_dictionary_id(uint8_t flags)
     return (uint8_t)((flags >> TMP_DICT_ID_SHIFT) & 0xFu);
 }
 
+static inline bool tmp_is_retry(uint8_t flags)
+{
+    return (flags & TMP_FLAG_RETRY) != 0u;
+}
+
+/* The master's retry rule. After an exchange whose reply was damaged or
+ * missing, the same poll goes again (same SEQ, same frame, TMP_FLAG_RETRY) at
+ * most `limit` times; then the master gives up on it, and TCP's own timer
+ * recovers whatever it carried. Returns true to poll again; `tries` counts
+ * the retries of the exchange in hand and starts over when it ends.
+ *
+ * The limit bounds how long the link holds a frame, so that it stays well
+ * under TCP's retransmission timeout (RFC 3366 §2.3): each try costs at most
+ * the poll's time on the wire and the response window, (1534 x 20 us) +
+ * 100 ms = 131 ms, so the default's 1 + 4 tries cost at most 0.65 s. A
+ * damaged reply, the usual case, costs a few milliseconds a try. */
+#define TMP_RETRY_LIMIT         4u
+static inline bool tmp_retry(uint8_t *tries, bool reply_intact, uint8_t limit)
+{
+    if (reply_intact || *tries >= limit) {
+        *tries = 0u;
+        return false;
+    }
+    (*tries)++;
+    return true;
+}
+
 static inline void put_be16(uint8_t *out, uint16_t value)
 {
     out[0] = (uint8_t)(value >> 8);

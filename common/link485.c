@@ -18,13 +18,19 @@ static struct outbound_slot outbound[OUTBOUND_SLOTS];
 static uint8_t outbound_head;
 static uint8_t outbound_count;
 
-/* MAC retry: the frame at the head of the queue stays there after it has
- * gone, until the master moves on to a new poll. A poll flagged
- * TMP_FLAG_RETRY with the SEQ we last answered means our answer did not reach
- * the master intact, and it gets the same frame again. */
-static bool    head_sent;           /* outbound[outbound_head] went in our last answer */
-static bool    answered_any;        /* last_sequence is valid */
-static uint8_t last_sequence;       /* the SEQ of the last poll we answered */
+/* The last reply, for a poll that asks for it again (TMP_FLAG_RETRY): its
+ * SEQ, and whether it carried the head of the queue, which then stays there
+ * until a new poll shows the reply arrived. */
+static bool    replied;
+static uint8_t replied_sequence;
+static bool    head_sent;
+
+/* A poll for us that went bad, to be answered with a NAK once the bus is
+ * quiet: until then the rest of it may still be coming (its length field may
+ * be what was damaged). */
+static bool     nak_due;
+static uint8_t  nak_sequence;
+static uint32_t last_heard_ms;      /* when the last byte was drained */
 
 static void (*before_reply)(void);
 static void (*tap)(bool transmitted, const uint8_t *data, size_t length);
@@ -32,6 +38,7 @@ static uint32_t last_poll_ms;
 static bool     polled;
 static uint32_t frames;
 static uint32_t retries;
+static uint32_t naks;
 
 void link485_init(void)
 {
@@ -39,8 +46,9 @@ void link485_init(void)
     inbound_length = 0u;
     outbound_head = 0u;
     outbound_count = 0u;
+    replied = false;
     head_sent = false;
-    answered_any = false;
+    nak_due = false;
     polled = false;
 }
 
@@ -69,28 +77,82 @@ uint32_t link485_retries(void)
     return retries;
 }
 
-static void reply(uint8_t sequence)
+uint32_t link485_naks(void)
+{
+    return naks;
+}
+
+/* The head of the queue arrived: it leaves. */
+static void head_delivered(void)
+{
+    if (head_sent) {
+        outbound_head = (uint8_t)((outbound_head + 1u) % OUTBOUND_SLOTS);
+        outbound_count--;
+        frames++;
+        head_sent = false;
+    }
+}
+
+/* One frame of ours on the wire. */
+static void transmit(enum tmp_type type, uint8_t sequence, const uint8_t *payload,
+                     uint16_t length)
 {
     static uint8_t wire[1u + TMP_FRAME_OVERHEAD + CFG_NET_FRAME];
+    wire[0] = 0xFFu;   /* preamble: absorbs the transceivers' turnaround */
+    const size_t wire_length = 1u + tmp_frame_build(&wire[1], type, TMP_ADDR_COLLECTOR, sequence,
+                                                    tmp_flags(false, 0u), payload, length);
+    rs485_send(wire, wire_length);
+    if (tap != NULL) {
+        tap(true, wire, wire_length);
+    }
+    /* Whatever the scanner held came before our frame: start the next frame clean.
+     * Bytes of the next poll may already be in the ring; they are kept. */
+    tmp_scanner_reset(&scanner);
+}
+
+/* The answer to a poll: the head of the queue, or nothing. The head stays
+ * queued, so a poll that asks again gets the same frame. */
+static void reply(uint8_t sequence)
+{
     const uint8_t *payload = NULL;
     uint16_t length = 0u;
     if (outbound_count != 0u) {
         payload = outbound[outbound_head].bytes;
         length = outbound[outbound_head].length;
-        if (!head_sent) {
-            frames++;
-        }
     }
-    head_sent = outbound_count != 0u;
-    wire[0] = 0xFFu;   /* preamble: absorbs the transceivers' turnaround */
-    const size_t wire_length = tmp_frame_build(&wire[1], TMP_NET, TMP_ADDR_COLLECTOR, sequence,
-                                               tmp_flags(false, 0u), payload, length);
-    rs485_send(wire, wire_length + 1u);
-    if (tap != NULL) {
-        tap(true, wire, wire_length + 1u);
+    transmit(TMP_NET, sequence, payload, length);
+    replied = true;
+    replied_sequence = sequence;
+    head_sent = length != 0u;
+}
+
+/* The header in the scanner is a poll's for us. By our own address only: a
+ * damaged byte can make any frame look like a broadcast, which every slave
+ * would answer at once. */
+static bool header_is_poll_for_us(void)
+{
+    return tmp_version_of(scanner.version_type) == TMP_V2_VERSION
+        && tmp_type_of(scanner.version_type) == TMP_POLL
+        && scanner.address == TMP_ADDR_COLLECTOR;
+}
+
+/* The bus has gone quiet. A frame still coming in was cut short: it is
+ * dropped, and if it is a poll for us, it went bad like one that failed its
+ * CRC. A poll that went bad gets its NAK now, when the master is listening;
+ * the poll's frame is not taken and our last reply stays as it was, so the
+ * master's next try is answered as if this one had never come. */
+static void bus_quiet(void)
+{
+    if ((scanner.state == SCAN_PAYLOAD || scanner.state == SCAN_CRC) && header_is_poll_for_us()) {
+        nak_due = true;
+        nak_sequence = scanner.sequence;
     }
-    /* rs485_send() dropped the echo, and with it anything half-parsed. */
     tmp_scanner_reset(&scanner);
+    if (nak_due) {
+        nak_due = false;
+        naks++;
+        transmit(TMP_NAK, nak_sequence, NULL, 0u);
+    }
 }
 
 static bool addressed_to_us(uint8_t address)
@@ -103,13 +165,19 @@ void link485_service(void)
     uint8_t chunk[64];
     size_t  filled = 0u;
     bool    answered = false;
+    bool    heard = false;
     uint8_t byte;
 
     while (!answered && rs485_getc(&byte)) {
         chunk[filled++] = byte;
-        if (tmp_scanner_push(&scanner, byte, &inbound) == SCAN_FRAME_READY
-            && inbound.type == TMP_POLL && addressed_to_us(inbound.address)) {
+        heard = true;
+        const enum tmp_scan_result scanned = tmp_scanner_push(&scanner, byte, &inbound);
+        if (scanned == SCAN_FRAME_READY && inbound.type == TMP_POLL
+            && addressed_to_us(inbound.address)) {
             answered = true;
+        } else if (scanned == SCAN_CRC_FAILED && header_is_poll_for_us()) {
+            nak_due = true;
+            nak_sequence = scanner.sequence;
         }
         if (filled == sizeof chunk || answered) {
             if (tap != NULL) {
@@ -121,32 +189,35 @@ void link485_service(void)
     if (filled != 0u && tap != NULL) {
         tap(false, chunk, filled);
     }
+    const uint32_t now_ms = hal_millis();
+    if (heard) {
+        last_heard_ms = now_ms;
+    }
     if (!answered) {
+        if (!heard && now_ms - last_heard_ms >= CFG_LINK_QUIET_MS) {
+            bus_quiet();
+        }
         return;
     }
 
+    nak_due = false;    /* a good poll since: it is the one to answer */
     polled = true;
-    last_poll_ms = hal_millis();
-    if ((inbound.flags & TMP_FLAG_RETRY) != 0u && answered_any
-        && inbound.sequence == last_sequence) {
-        /* The master did not get our answer: the same again. We took this
-         * poll's frame the first time. */
+    last_poll_ms = now_ms;
+    if (tmp_is_retry(inbound.flags) && replied && inbound.sequence == replied_sequence) {
+        /* Our reply did not reach the master intact: the same again. The
+         * poll's frame is the one we took the first time; it is not taken
+         * twice (the stack may still be reading that copy). */
         retries++;
     } else {
-        if (head_sent) {
-            /* The master has moved on, so our last frame arrived (or the
-             * master gave up on it). */
-            outbound_head = (uint8_t)((outbound_head + 1u) % OUTBOUND_SLOTS);
-            outbound_count--;
-            head_sent = false;
-        }
+        /* A new exchange: the master has our last reply. A poll asking again
+         * for a reply we never sent (we did not hear the first, or we reset
+         * since) is new to us too. */
+        head_delivered();
         inbound_length = inbound.length;
         if (inbound_length != 0u) {
             frames++;
         }
     }
-    answered_any = true;
-    last_sequence = inbound.sequence;
     if (before_reply != NULL) {
         before_reply();
     }

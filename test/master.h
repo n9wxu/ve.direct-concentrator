@@ -38,6 +38,9 @@ extern uint8_t          sequence;
 extern struct tmp_frame answer;
 extern bool             answered;
 void exchange_raw(const uint8_t *bytes, size_t length);
+/* Nothing on the wire for `ms`: the unit runs, and `answer` is what it sent
+ * meanwhile (a NAK for a poll that went bad). */
+void quiet(uint32_t ms);
 void poll(uint8_t address, const uint8_t *frame, size_t length);
 /* A poll with a given SEQ and FLAGS; poll() counts SEQ up and sends none. */
 void poll_as(uint8_t address, uint8_t poll_sequence, uint8_t flags, const uint8_t *frame,

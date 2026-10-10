@@ -85,6 +85,13 @@ void exchange_raw(const uint8_t *bytes, size_t length)
     }
 }
 
+void quiet(uint32_t ms)
+{
+    static const uint8_t nothing[1];
+    now_ms += ms;
+    exchange_raw(nothing, 0u);
+}
+
 void poll_as(uint8_t address, uint8_t poll_sequence, uint8_t flags, const uint8_t *frame,
              size_t length)
 {

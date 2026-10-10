@@ -114,8 +114,24 @@ and every protocol, the VE.Direct TCP streams, UDP and ping alike, within
 milliseconds, so TCP never has to wait out its retransmission timeout for
 a frame the link lost. Before the retry, that timeout (a second, doubling
 each time) cost VE.Direct data once the port's 512-byte buffer filled.
-`status` counts the retries the unit answered as `retry`. The protocol is
-halfduplex-tcpip's (`docs/PROTOCOL.md` §5).
+
+A poll that reaches the unit damaged (its CRC fails, or it stops short of
+its length) gets a NAK, so recon sends it again at once instead of waiting
+out its 100 ms response window for a reply that will not come. The unit
+sends the NAK only once the bus has been quiet for 1–2 ms
+(`CFG_LINK_QUIET_MS`), in case the length field is what broke and more of
+the poll is still coming, and only for its own address. A NAK changes
+nothing else: the poll's frame is not taken, and the last reply is kept for
+a retry. `status` counts the retries the unit answered as `retry` and the
+NAKs as `nak`. The protocol is halfduplex-tcpip's (`docs/PROTOCOL.md` §5).
+
+On the trailer with release 12, one reply and one poll in three damaged on
+purpose by recon (`tmptun -f 3 -s 3`), every VE.Direct block on ports 1, 2
+and 4 arrived intact, and so did 680 pings out of 680; the link kept its
+full rate. With the retry alone (release 11), the same damage left the
+link waiting out response windows for most of each second, and the
+512-byte port buffers overflowed. The measurements are in
+halfduplex-tcpip's README, under Recovery.
 
 ## Building
 
@@ -235,22 +251,26 @@ recon's master is `master/linux/tmptun.c` from
 repo's `include/tmp_v2.h`, at 500 kbaud. It is built in `~/tmptun`
 (`gcc -O2 -std=c11 -I. -o tmptun tmptun.c`), and `tmptun.service` runs
 `/home/admin/tmptun/tmptun /dev/ttyAMA3 tap0`. Earlier builds and files are
-kept beside them (`*.no-retry`, `*.arq`, `*.tcpclock`,
-`/usr/local/sbin/tunnel-up.sh.quickack`). The unit and recon must change
-baud rate together.
+kept beside them (`*.no-retry`, `*.arq`, `*.tcpclock`, `*.mac-retry`).
+`/usr/local/sbin/tunnel-up.sh` gives tap0's route `quickack`, as
+halfduplex-tcpip's does; the version without it is kept as
+`tunnel-up.sh.no-quickack`. The unit and recon must change baud rate
+together.
 
 Updates need the TFTP service on recon (`trailer-monitor/ops/README.md`:
 `dnsmasq-base` and `vedc-tftp.service`) and `tools/vedc.py`. Before the unit
 goes on the bus, put the images it runs in `/srv/vedc`, so a fetch always
-finds a known-good pair. The unit runs the v11 application with the v4
+finds a known-good pair. The unit runs the v12 application with the v4
 bootloader: release 5 changed the VE port mapping, which the bootloader does
 not use; release 6 the 485 echo flush, which in the bootloader only slows a
-fetch now and then; release 11 answers recon's retries. The v4 bootloader
-takes a retry as a new poll, so a reply damaged during a fetch stays lost
-and TFTP's own retry recovers it. Release 10 also made the ports listen
-again whenever the stack closed a connection without an event (a reset in
-LAST-ACK); release 11 keeps that. Releases 7 to 10 were trials of other ways
-to recover lost frames.
+fetch now and then; release 11 answers recon's retries, and release 12
+NAKs a damaged poll. The v4 bootloader takes a retry as a new poll and
+sends no NAK, so a reply damaged during a fetch stays lost and TFTP's own
+retry recovers it, and a poll damaged during one costs recon's response
+window. Release 10 also made the ports listen again whenever the stack
+closed a connection without an event (a reset in LAST-ACK); releases 11 and
+12 keep that. Releases 7 to 10 were trials of other ways to recover lost
+frames.
 
 Still to change on recon:
 
@@ -266,7 +286,7 @@ These look at the link from recon, past what `ping` can show:
 |---|---|
 | `tools/vecapture.py` | Is each device streaming, and intact? Captures every port's TCP stream, checks each VE.Direct block's checksum and decodes the latest values. Runs alongside tmptun; a port with a client already gets refused. |
 | `tools/bustest.py` | Is the wire good, and which way does it fail? Plays the master in tmptun's place (`--manage-tmptun` stops and restarts it) and counts each poll as answered, CRC-failed, partial or silent: silent polls are the unit not hearing recon, CRC failures the reverse. Also listens to the idle line, and reads the UART's framing and overrun counters. |
-| `tmptun -v -t <s>` | What does the link do under its real master? recon's tmptun (halfduplex-tcpip) logs every failed exchange and prints totals: failures by kind, retries after a damaged reply and after none, exchanges given up, the empty exchange. `-f <n>` damages every nth frame-carrying reply and `-s <n>` every nth frame-carrying poll on purpose, to prove the recovery. Run it in the service's place. |
+| `tmptun -v -t <s>` | What does the link do under its real master? recon's tmptun (halfduplex-tcpip) logs every failed exchange and prints totals: failures by kind (NAKs among them), polls tried again, exchanges repaired and given up, the time to a NAK and the empty exchange. `-f <n>` damages every nth frame-carrying reply and `-s <n>` every nth frame-carrying poll (which the unit NAKs) on purpose, to prove the recovery. Run it in the service's place. |
 | `tools/tmptun-debug.c` | The same instrumentation on the master as it was at bring-up: it found the post-reply flush window fixed in release 6. |
 
 ```sh

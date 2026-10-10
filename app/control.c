@@ -86,6 +86,8 @@ static void status(void)
     add_number(uart_rx_lost(UART_485));
     add(" retry ");
     add_number(link485_retries());
+    add(" nak ");
+    add_number(link485_naks());
     for (uint8_t port = 0u; port < VE_PORT_COUNT; port++) {
         add(" ve");
         add_number(port + 1u);
