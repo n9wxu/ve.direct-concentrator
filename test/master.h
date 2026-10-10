@@ -39,6 +39,12 @@ extern struct tmp_frame answer;
 extern bool             answered;
 void exchange_raw(const uint8_t *bytes, size_t length);
 void poll(uint8_t address, const uint8_t *frame, size_t length);
+/* A poll with a given SEQ and FLAGS; poll() counts SEQ up and sends none. */
+void poll_as(uint8_t address, uint8_t poll_sequence, uint8_t flags, const uint8_t *frame,
+             size_t length);
+/* A MAC retry: the last poll's SEQ again, flagged TMP_FLAG_RETRY, as the
+ * master sends it when the answer came damaged or not at all. */
+void retry(uint8_t address, const uint8_t *frame, size_t length);
 
 /* Frame builders; each returns the header length. */
 uint16_t checksum(const uint8_t *data, size_t length, uint32_t sum);
@@ -47,8 +53,5 @@ void     put32(uint8_t *at, uint32_t value);
 size_t   ethernet(uint8_t *frame, const uint8_t *destination, uint16_t type);
 size_t   ipv4(uint8_t *frame, uint8_t protocol, size_t payload_length);
 uint32_t pseudo_header(uint8_t protocol, size_t length);
-/* The same from another source address: a host beyond recon. */
-size_t   ipv4_from(uint8_t *frame, uint32_t source, uint8_t protocol, size_t payload_length);
-uint32_t pseudo_header_from(uint32_t source, uint8_t protocol, size_t length);
 
 #endif

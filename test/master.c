@@ -85,12 +85,24 @@ void exchange_raw(const uint8_t *bytes, size_t length)
     }
 }
 
-void poll(uint8_t address, const uint8_t *frame, size_t length)
+void poll_as(uint8_t address, uint8_t poll_sequence, uint8_t flags, const uint8_t *frame,
+             size_t length)
 {
     static uint8_t wire[TMP_FRAME_MAX];
-    const size_t wire_length = tmp_frame_build(wire, TMP_POLL, address, ++sequence,
-                                               tmp_flags(false, 0u), frame, length);
+    sequence = poll_sequence;
+    const size_t wire_length = tmp_frame_build(wire, TMP_POLL, address, poll_sequence, flags,
+                                               frame, length);
     exchange_raw(wire, wire_length);
+}
+
+void poll(uint8_t address, const uint8_t *frame, size_t length)
+{
+    poll_as(address, (uint8_t)(sequence + 1u), tmp_flags(false, 0u), frame, length);
+}
+
+void retry(uint8_t address, const uint8_t *frame, size_t length)
+{
+    poll_as(address, sequence, (uint8_t)(tmp_flags(false, 0u) | TMP_FLAG_RETRY), frame, length);
 }
 
 /* ── Frame builders ─────────────────────────────────────────────────── */
@@ -122,18 +134,13 @@ size_t ethernet(uint8_t *frame, const uint8_t *destination, uint16_t type)
 
 size_t ipv4(uint8_t *frame, uint8_t protocol, size_t payload_length)
 {
-    return ipv4_from(frame, MASTER_IP, protocol, payload_length);
-}
-
-size_t ipv4_from(uint8_t *frame, uint32_t source, uint8_t protocol, size_t payload_length)
-{
     uint8_t *ip = frame + ethernet(frame, unit_mac, 0x0800u);
     memset(ip, 0, 20);
     ip[0] = 0x45u;
     put16(ip + 2, (uint16_t)(20u + payload_length));
     ip[8] = 64u;
     ip[9] = protocol;
-    put32(ip + 12, source);
+    put32(ip + 12, MASTER_IP);
     put32(ip + 16, CFG_IP_ADDR);
     put16(ip + 10, checksum(ip, 20u, 0u));
     return 34u;
@@ -141,11 +148,6 @@ size_t ipv4_from(uint8_t *frame, uint32_t source, uint8_t protocol, size_t paylo
 
 uint32_t pseudo_header(uint8_t protocol, size_t length)
 {
-    return pseudo_header_from(MASTER_IP, protocol, length);
-}
-
-uint32_t pseudo_header_from(uint32_t source, uint8_t protocol, size_t length)
-{
-    return (source >> 16) + (source & 0xFFFFu) + (CFG_IP_ADDR >> 16) + (CFG_IP_ADDR & 0xFFFFu)
+    return (MASTER_IP >> 16) + (MASTER_IP & 0xFFFFu) + (CFG_IP_ADDR >> 16) + (CFG_IP_ADDR & 0xFFFFu)
          + protocol + (uint32_t)length;
 }

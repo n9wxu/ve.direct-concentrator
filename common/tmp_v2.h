@@ -28,7 +28,11 @@ enum tmp_type {
 };
 
 enum tmp_flag {
-    TMP_FLAG_COMPRESSED = 0x01u
+    TMP_FLAG_COMPRESSED = 0x01u,
+    /* On a POLL: a MAC retry. The master got no intact answer to the poll
+     * with this SEQ, and sends it again; a slave that answered it sends the
+     * same answer again and does not take the poll's frame a second time. */
+    TMP_FLAG_RETRY      = 0x02u
 };
 #define TMP_DICT_ID_SHIFT       4u
 

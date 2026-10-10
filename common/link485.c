@@ -18,13 +18,20 @@ static struct outbound_slot outbound[OUTBOUND_SLOTS];
 static uint8_t outbound_head;
 static uint8_t outbound_count;
 
+/* MAC retry: the frame at the head of the queue stays there after it has
+ * gone, until the master moves on to a new poll. A poll flagged
+ * TMP_FLAG_RETRY with the SEQ we last answered means our answer did not reach
+ * the master intact, and it gets the same frame again. */
+static bool    head_sent;           /* outbound[outbound_head] went in our last answer */
+static bool    answered_any;        /* last_sequence is valid */
+static uint8_t last_sequence;       /* the SEQ of the last poll we answered */
+
 static void (*before_reply)(void);
-static void (*on_idle_poll)(void);
 static void (*tap)(bool transmitted, const uint8_t *data, size_t length);
 static uint32_t last_poll_ms;
 static bool     polled;
 static uint32_t frames;
-static uint32_t idle_polls;
+static uint32_t retries;
 
 void link485_init(void)
 {
@@ -32,17 +39,14 @@ void link485_init(void)
     inbound_length = 0u;
     outbound_head = 0u;
     outbound_count = 0u;
+    head_sent = false;
+    answered_any = false;
     polled = false;
 }
 
 void link485_set_before_reply(void (*hook)(void))
 {
     before_reply = hook;
-}
-
-void link485_set_on_idle_poll(void (*hook)(void))
-{
-    on_idle_poll = hook;
 }
 
 void link485_set_tap(void (*function)(bool, const uint8_t *, size_t))
@@ -60,9 +64,9 @@ uint32_t link485_frames(void)
     return frames;
 }
 
-uint32_t link485_idle_polls(void)
+uint32_t link485_retries(void)
 {
-    return idle_polls;
+    return retries;
 }
 
 static void reply(uint8_t sequence)
@@ -73,21 +77,19 @@ static void reply(uint8_t sequence)
     if (outbound_count != 0u) {
         payload = outbound[outbound_head].bytes;
         length = outbound[outbound_head].length;
+        if (!head_sent) {
+            frames++;
+        }
     }
+    head_sent = outbound_count != 0u;
     wire[0] = 0xFFu;   /* preamble: absorbs the transceivers' turnaround */
-    const size_t wire_length = 1u + tmp_frame_build(&wire[1], TMP_NET, TMP_ADDR_COLLECTOR, sequence,
-                                                    tmp_flags(false, 0u), payload, length);
-    rs485_send(wire, wire_length);
+    const size_t wire_length = tmp_frame_build(&wire[1], TMP_NET, TMP_ADDR_COLLECTOR, sequence,
+                                               tmp_flags(false, 0u), payload, length);
+    rs485_send(wire, wire_length + 1u);
     if (tap != NULL) {
-        tap(true, wire, wire_length);
+        tap(true, wire, wire_length + 1u);
     }
-    if (outbound_count != 0u) {
-        outbound_head = (uint8_t)((outbound_head + 1u) % OUTBOUND_SLOTS);
-        outbound_count--;
-        frames++;
-    }
-    /* Whatever the scanner held came before our reply: start the next frame clean.
-     * Bytes of the next poll may already be in the ring; they are kept. */
+    /* rs485_send() dropped the echo, and with it anything half-parsed. */
     tmp_scanner_reset(&scanner);
 }
 
@@ -125,16 +127,26 @@ void link485_service(void)
 
     polled = true;
     last_poll_ms = hal_millis();
-    inbound_length = inbound.length;
-    if (inbound_length != 0u) {
-        frames++;
-    } else if (outbound_count == 0u) {
-        /* The master has nothing more for us, and everything we sent has gone. */
-        idle_polls++;
-        if (on_idle_poll != NULL) {
-            on_idle_poll();
+    if ((inbound.flags & TMP_FLAG_RETRY) != 0u && answered_any
+        && inbound.sequence == last_sequence) {
+        /* The master did not get our answer: the same again. We took this
+         * poll's frame the first time. */
+        retries++;
+    } else {
+        if (head_sent) {
+            /* The master has moved on, so our last frame arrived (or the
+             * master gave up on it). */
+            outbound_head = (uint8_t)((outbound_head + 1u) % OUTBOUND_SLOTS);
+            outbound_count--;
+            head_sent = false;
+        }
+        inbound_length = inbound.length;
+        if (inbound_length != 0u) {
+            frames++;
         }
     }
+    answered_any = true;
+    last_sequence = inbound.sequence;
     if (before_reply != NULL) {
         before_reply();
     }

@@ -7,7 +7,6 @@
 #include "link485.h"
 #include "linkcheck.h"
 #include "loadctl.h"
-#include "tcplink.h"
 #include "uart.h"
 #include "udp.h"
 #include "veports.h"
@@ -85,8 +84,8 @@ static void status(void)
     add("s");
     add(" 485lost ");
     add_number(uart_rx_lost(UART_485));
-    add(" retx ");
-    add_number(tcplink_retransmissions());
+    add(" retry ");
+    add_number(link485_retries());
     for (uint8_t port = 0u; port < VE_PORT_COUNT; port++) {
         add(" ve");
         add_number(port + 1u);

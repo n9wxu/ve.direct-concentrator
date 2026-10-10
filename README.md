@@ -102,24 +102,20 @@ recon's RSM485PHT needed about 80 µs with the RP2040; an FT232R USB-485
 adapter with automatic direction control needs 150–300 µs. One image serves
 both, so what goes to recon can be tested on the bench first.
 
-### TCP on the link: the poll is the clock
+### Retries on the link
 
-The VE.Direct streams are TCP, and TCP's own acknowledgements decide what
-is resent; the link adds no signalling. What the link adds is knowing when
-an acknowledgement is due. recon's tmptun hands each segment from the unit
-to its kernel and waits (up to 5 ms) for the kernel's ACK before it polls
-again, and the kernel acknowledges at once (the `quickack` route on
-`tap0`). So when recon's next poll comes with nothing for the unit, a
-segment the unit sent to recon and that is still unacknowledged never
-arrived: `app/tcplink.c` sends it again in the reply to that very poll
-(smallest_tcp's `tcp_retransmit()`), instead of letting TCP wait a second
-and double that each time, which used to cost VE.Direct data once its
-512-byte buffers filled. `status` counts these as `retx`.
-
-Only connections to recon itself (the unit's own subnet) work this way. A
-client beyond recon, reached through it as a router, answers when it
-answers, so its connection keeps TCP's own timeout. The other way, a poll
-the unit did not hear at all comes again from recon at once.
+A frame damaged on the pair is repaired by the link itself, below IP. Every
+frame carries a CRC-32, so recon knows when a reply arrived damaged, or did
+not arrive: it sends the same poll again, flagged as a retry, and the unit
+answers with the same frame. The unit keeps each frame it sent until recon
+moves on to a new poll, and does not take a retried poll's frame twice; a
+retry of a poll it never heard is new to it. That covers both directions
+and every protocol, the VE.Direct TCP streams, UDP and ping alike, within
+milliseconds, so TCP never has to wait out its retransmission timeout for
+a frame the link lost. Before the retry, that timeout (a second, doubling
+each time) cost VE.Direct data once the port's 512-byte buffer filled.
+`status` counts the retries the unit answered as `retry`. The protocol is
+halfduplex-tcpip's (`docs/PROTOCOL.md` §5).
 
 ## Building
 
@@ -238,21 +234,23 @@ recon's master is `master/linux/tmptun.c` from
 [halfduplex-tcpip](https://github.com/n9wxu/halfduplex-tcpip), with that
 repo's `include/tmp_v2.h`, at 500 kbaud. It is built in `~/tmptun`
 (`gcc -O2 -std=c11 -I. -o tmptun tmptun.c`), and `tmptun.service` runs
-`/home/admin/tmptun/tmptun /dev/ttyAMA3 tap0`. `/usr/local/sbin/tunnel-up.sh`
-gives `tap0`'s route `quickack`. Earlier builds and files are kept beside
-them (`*.no-retry`, `*.arq`, `tunnel-up.sh.no-quickack`). The unit and recon
-must change baud rate together.
+`/home/admin/tmptun/tmptun /dev/ttyAMA3 tap0`. Earlier builds and files are
+kept beside them (`*.no-retry`, `*.arq`, `*.tcpclock`,
+`/usr/local/sbin/tunnel-up.sh.quickack`). The unit and recon must change
+baud rate together.
 
 Updates need the TFTP service on recon (`trailer-monitor/ops/README.md`:
 `dnsmasq-base` and `vedc-tftp.service`) and `tools/vedc.py`. Before the unit
 goes on the bus, put the images it runs in `/srv/vedc`, so a fetch always
-finds a known-good pair. The unit runs the v10 application with the v4
+finds a known-good pair. The unit runs the v11 application with the v4
 bootloader: release 5 changed the VE port mapping, which the bootloader does
 not use; release 6 the 485 echo flush, which in the bootloader only slows a
-fetch now and then; release 10 lets recon's polls time TCP's retransmissions,
-which the bootloader (UDP only) does without, and listens again on a port
-whose connection the stack closed without an event. Releases 7 to 9 were
-trials on the way.
+fetch now and then; release 11 answers recon's retries. The v4 bootloader
+takes a retry as a new poll, so a reply damaged during a fetch stays lost
+and TFTP's own retry recovers it. Release 10 also made the ports listen
+again whenever the stack closed a connection without an event (a reset in
+LAST-ACK); release 11 keeps that. Releases 7 to 10 were trials of other ways
+to recover lost frames.
 
 Still to change on recon:
 
@@ -268,7 +266,7 @@ These look at the link from recon, past what `ping` can show:
 |---|---|
 | `tools/vecapture.py` | Is each device streaming, and intact? Captures every port's TCP stream, checks each VE.Direct block's checksum and decodes the latest values. Runs alongside tmptun; a port with a client already gets refused. |
 | `tools/bustest.py` | Is the wire good, and which way does it fail? Plays the master in tmptun's place (`--manage-tmptun` stops and restarts it) and counts each poll as answered, CRC-failed, partial or silent: silent polls are the unit not hearing recon, CRC failures the reverse. Also listens to the idle line, and reads the UART's framing and overrun counters. |
-| `tmptun -v -t <s>` | What does the link do under its real master? recon's tmptun (halfduplex-tcpip) logs every failed exchange and prints totals: failures by kind, frames sent again, the host's ACK latency, the empty exchange. `-f <n>` damages every nth frame-carrying reply and `-s <n>` every nth frame-carrying poll on purpose, to prove the recovery. Run it in the service's place. |
+| `tmptun -v -t <s>` | What does the link do under its real master? recon's tmptun (halfduplex-tcpip) logs every failed exchange and prints totals: failures by kind, retries after a damaged reply and after none, exchanges given up, the empty exchange. `-f <n>` damages every nth frame-carrying reply and `-s <n>` every nth frame-carrying poll on purpose, to prove the recovery. Run it in the service's place. |
 | `tools/tmptun-debug.c` | The same instrumentation on the master as it was at bring-up: it found the post-reply flush window fixed in release 6. |
 
 ```sh
